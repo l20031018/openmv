@@ -1,4 +1,4 @@
-MCU=STM32H743xx
+MCU=STM32H750xx
 CPU=cortex-m7
 FPU=fpv5-sp-d16
 PORT=stm32
