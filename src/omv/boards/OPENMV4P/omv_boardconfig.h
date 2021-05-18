@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -52,6 +52,9 @@
 
 // Enable hardware JPEG
 #define OMV_HARDWARE_JPEG       (1)
+
+// Enable MDMA sensor offload.
+#define OMV_ENABLE_SENSOR_MDMA  (1)
 
 // Enable sensor drivers
 #define OMV_ENABLE_OV2640       (1)
@@ -120,7 +123,8 @@
 #define OMV_OSC_PLL3FRAC        (0)
 
 // Clock Sources
-#define OMV_OSC_USB_CLKSOURCE       RCC_USBCLKSOURCE_PLL
+#define OMV_OSC_PLL_CLKSOURCE       RCC_PLLSOURCE_HSE
+#define OMV_OSC_USB_CLKSOURCE       RCC_USBCLKSOURCE_HSI48
 #define OMV_OSC_RNG_CLKSOURCE       RCC_RNGCLKSOURCE_HSI48
 #define OMV_OSC_ADC_CLKSOURCE       RCC_ADCCLKSOURCE_PLL3
 #define OMV_OSC_SPI123_CLKSOURCE    RCC_SPI123CLKSOURCE_PLL3
@@ -138,26 +142,26 @@
 // Linker script constants (see the linker script template stm32fxxx.ld.S).
 // Note: fb_alloc is a stack-based, dynamically allocated memory on FB.
 // The maximum available fb_alloc memory = FB_ALLOC_SIZE + FB_SIZE - (w*h*bpp).
-#define OMV_FFS_MEMORY          DTCM        // Flash filesystem cache memory
 #define OMV_MAIN_MEMORY         SRAM1       // data, bss and heap
 #define OMV_STACK_MEMORY        ITCM        // stack memory
-#define OMV_DMA_MEMORY          AXI_SRAM    // DMA buffers memory.
+#define OMV_DMA_MEMORY          SRAM3       // Misc DMA buffers memory.
 #define OMV_FB_MEMORY           DRAM        // Framebuffer, fb_alloc
 #define OMV_JPEG_MEMORY         DRAM        // JPEG buffer memory buffer.
 #define OMV_JPEG_MEMORY_OFFSET  (31M)       // JPEG buffer is placed after FB/fballoc memory.
 #define OMV_VOSPI_MEMORY        SRAM4       // VoSPI buffer memory.
-#define OMV_FB_OVERLAY_MEMORY   AXI_SRAM    // _fballoc_overlay memory.
-#define OMV_FB_OVERLAY_MEMORY_OFFSET    (480*1024)  // _fballoc_overlay
+#define OMV_FB_OVERLAY_MEMORY   AXI_SRAM    // Fast fb_alloc memory.
+#define OMV_FB_OVERLAY_MEMORY_OFFSET    (496*1024) // Fast fb_alloc memory size.
 
 #define OMV_FB_SIZE             (20M)       // FB memory: header + VGA/GS image
 #define OMV_FB_ALLOC_SIZE       (11M)       // minimum fb alloc size
 #define OMV_STACK_SIZE          (64K)
-#define OMV_HEAP_SIZE           (244K)
+#define OMV_HEAP_SIZE           (240K)
 #define OMV_SDRAM_SIZE          (32 * 1024 * 1024) // This needs to be here for UVC firmware.
 
 #define OMV_LINE_BUF_SIZE       (11 * 1024) // Image line buffer round(2592 * 2BPP * 2 buffers).
-#define OMV_MSC_BUF_SIZE        (12K)       // USB MSC bot data
+#define OMV_MSC_BUF_SIZE        (2K)        // USB MSC bot data
 #define OMV_VFS_BUF_SIZE        (1K)        // VFS sturct + FATFS file buffer (624 bytes)
+#define OMV_FIR_LEPTON_BUF_SIZE (1K)        // FIR Lepton Packet Double Buffer (328 bytes)
 #define OMV_JPEG_BUF_SIZE       (1024*1024) // IDE JPEG buffer (header + data).
 
 #define OMV_BOOT_ORIGIN         0x08000000
@@ -169,7 +173,7 @@
 #define OMV_ITCM_ORIGIN         0x00000000
 #define OMV_ITCM_LENGTH         64K
 #define OMV_SRAM1_ORIGIN        0x30000000
-#define OMV_SRAM1_LENGTH        256K
+#define OMV_SRAM1_LENGTH        256K        // SRAM1 + SRAM2 + 1/2 SRAM3
 #define OMV_SRAM3_ORIGIN        0x30040000
 #define OMV_SRAM3_LENGTH        32K
 #define OMV_SRAM4_ORIGIN        0x38000000
@@ -178,11 +182,28 @@
 #define OMV_AXI_SRAM_LENGTH     512K
 #define OMV_DRAM_ORIGIN         0xC0000000
 #define OMV_DRAM_LENGTH         32M
-#define OMV_FB_OVERLAY_MEMORY_ORIGIN    OMV_AXI_SRAM_ORIGIN
 
-// Use the MPU to set an uncacheable memory region.
-#define OMV_DMA_REGION_BASE     (OMV_AXI_SRAM_ORIGIN+OMV_FB_OVERLAY_MEMORY_OFFSET)
-#define OMV_DMA_REGION_SIZE     MPU_REGION_SIZE_32KB
+// Domain 1 DMA buffers region.
+#define OMV_DMA_MEMORY_D1       AXI_SRAM
+#define OMV_DMA_MEMORY_D1_SIZE  (16*1024) // Reserved memory for DMA buffers
+#define OMV_DMA_REGION_D1_BASE  (OMV_AXI_SRAM_ORIGIN+OMV_FB_OVERLAY_MEMORY_OFFSET)
+#define OMV_DMA_REGION_D1_SIZE  MPU_REGION_SIZE_16KB
+
+// Domain 2 DMA buffers region.
+#define OMV_DMA_MEMORY_D2       SRAM3
+#define OMV_DMA_MEMORY_D2_SIZE  (16*1024) // Reserved memory for DMA buffers
+#define OMV_DMA_REGION_D2_BASE  (OMV_SRAM3_ORIGIN+(0*1024))
+#define OMV_DMA_REGION_D2_SIZE  MPU_REGION_SIZE_32KB
+
+// Domain 3 DMA buffers region.
+#define OMV_DMA_MEMORY_D3       SRAM4
+#define OMV_DMA_MEMORY_D3_SIZE  (64*1024) // Reserved memory for DMA buffers
+#define OMV_DMA_REGION_D3_BASE  (OMV_SRAM4_ORIGIN+(0*1024))
+#define OMV_DMA_REGION_D3_SIZE  MPU_REGION_SIZE_64KB
+
+// AXI QoS - Low-High (0:15) - default 0
+#define OMV_AXI_QOS_MDMA_R_PRI  15 // Max pri to move data.
+#define OMV_AXI_QOS_MDMA_W_PRI  15 // Max pri to move data.
 
 // Image sensor I2C
 #define ISC_I2C                 (I2C1)
@@ -401,6 +422,10 @@
 #define OMV_SPI_LCD_MOSI_PIN                (GPIO_PIN_15)
 #define OMV_SPI_LCD_MOSI_PORT               (GPIOB)
 #define OMV_SPI_LCD_MOSI_ALT                (GPIO_AF5_SPI2)
+
+#define OMV_SPI_LCD_MISO_PIN                (GPIO_PIN_14)
+#define OMV_SPI_LCD_MISO_PORT               (GPIOB)
+#define OMV_SPI_LCD_MISO_ALT                (GPIO_AF5_SPI2)
 
 #define OMV_SPI_LCD_SCLK_PIN                (GPIO_PIN_13)
 #define OMV_SPI_LCD_SCLK_PORT               (GPIOB)

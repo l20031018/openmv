@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -59,6 +59,7 @@
 #include "wifidbg.h"
 #include "sdram.h"
 #include "fb_alloc.h"
+#include "dma_alloc.h"
 #include "ff_wrapper.h"
 
 #include "usbd_core.h"
@@ -70,6 +71,7 @@
 #include "py_lcd.h"
 #include "py_fir.h"
 #include "py_tv.h"
+#include "py_buzzer.h"
 #include "py_imu.h"
 #include "py_audio.h"
 
@@ -84,8 +86,12 @@
 #include "drivers/cyw43/cyw43.h"
 #endif
 
+#if MICROPY_PY_BLUETOOTH
+#include "extmod/modbluetooth.h"
+#endif
+
 int errno;
-extern char _vfs_buf;
+extern char _vfs_buf[];
 static fs_user_mount_t *vfs_fat = (fs_user_mount_t *) &_vfs_buf;
 #if MICROPY_PY_THREAD
 pyb_thread_t pyb_thread_main;
@@ -359,7 +365,7 @@ int ini_handler_callback(void *user, const char *section, const char *name, cons
     #undef MATCH
 }
 
-FRESULT exec_boot_script(const char *path, bool selftest, bool interruptible)
+FRESULT exec_boot_script(const char *path, bool selftest, bool interruptible, bool wifidbg_enabled)
 {
     nlr_buf_t nlr;
     bool interrupted = false;
@@ -371,6 +377,9 @@ FRESULT exec_boot_script(const char *path, bool selftest, bool interruptible)
             if (interruptible) {
                 usbdbg_set_irq_enabled(true);
                 usbdbg_set_script_running(true);
+                #if OMV_ENABLE_WIFIDBG && MICROPY_PY_WINC1500
+                wifidbg_set_irq_enabled(wifidbg_enabled);
+                #endif
             }
 
             // Parse, compile and execute the script.
@@ -384,6 +393,9 @@ FRESULT exec_boot_script(const char *path, bool selftest, bool interruptible)
     // Disable IDE interrupts
     usbdbg_set_irq_enabled(false);
     usbdbg_set_script_running(false);
+    #if OMV_ENABLE_WIFIDBG && MICROPY_PY_WINC1500
+    wifidbg_set_irq_enabled(false);
+    #endif
 
     if (interrupted) {
         if (selftest) {
@@ -482,6 +494,11 @@ soft_reset:
     // GC init
     gc_init(&_heap_start, &_heap_end);
 
+    #if MICROPY_ENABLE_PYSTACK
+    static mp_obj_t pystack[384];
+    mp_pystack_init(pystack, &pystack[384]);
+    #endif
+
     // Micro Python init
     mp_init();
     mp_obj_list_init(mp_sys_path, 0);
@@ -489,9 +506,17 @@ soft_reset:
 
     // Initialise low-level sub-systems. Here we need to do the very basic
     // things like zeroing out memory and resetting any of the sub-systems.
+    #if MICROPY_PY_LCD
     py_lcd_init0();
+    #endif
     py_fir_init0();
+    #if MICROPY_PY_TV
     py_tv_init0();
+    #endif
+    #if MICROPY_PY_BUZZER
+    py_buzzer_init0();
+    #endif // MICROPY_PY_BUZZER
+    imlib_init_all();
     readline_init0();
     pin_init0();
     extint_init0();
@@ -502,13 +527,16 @@ soft_reset:
     i2c_init0();
     spi_init0();
     uart_init0();
-    sensor_init0();
-    framebuffer_init0();
     fb_alloc_init0();
+    framebuffer_init0();
+    sensor_init0();
+    dma_alloc_init0();
     #ifdef IMLIB_ENABLE_IMAGE_FILE_IO
     file_buffer_init0();
     #endif
+    #if MICROPY_HW_ENABLE_SERVO
     servo_init();
+    #endif
     usbdbg_init();
     #if MICROPY_HW_ENABLE_SDCARD
     sdcard_init();
@@ -523,8 +551,12 @@ soft_reset:
         #if LWIP_MDNS_RESPONDER
         mdns_resp_init();
         #endif
-        systick_enable_dispatch(SYSTICK_DISPATCH_LWIP, mod_network_lwip_poll_wrapper);
     }
+    systick_enable_dispatch(SYSTICK_DISPATCH_LWIP, mod_network_lwip_poll_wrapper);
+    #endif
+    #if MICROPY_PY_BLUETOOTH
+    extern void mp_bluetooth_hci_systick(uint32_t ticks_ms);
+    systick_enable_dispatch(SYSTICK_DISPATCH_BLUETOOTH_HCI, mp_bluetooth_hci_systick);
     #endif
 
     #if MICROPY_PY_NETWORK_CYW43
@@ -630,8 +662,9 @@ soft_reset:
     // Parse OpenMV configuration file.
     openmv_config_t openmv_config;
     memset(&openmv_config, 0, sizeof(openmv_config));
-    // Parse config, and init wifi if enabled.
     ini_parse(&vfs_fat->fatfs, "/openmv.config", ini_handler_callback, &openmv_config);
+
+    // Init wifi debugging if enabled and on first soft-reset only.
     #if OMV_ENABLE_WIFIDBG && MICROPY_PY_WINC1500
     if (openmv_config.wifidbg == true &&
             wifidbg_init(&openmv_config.wifidbg_config) != 0) {
@@ -645,11 +678,11 @@ soft_reset:
     if (first_soft_reset) {
         // Execute the boot.py script before initializing the USB dev to
         // override the USB mode if required, otherwise VCP+MSC is used.
-        exec_boot_script("/boot.py", false, false);
+        exec_boot_script("/boot.py", false, false, false);
         #if (OMV_ENABLE_SELFTEST == 1)
         // Execute the selftests.py script before the filesystem is mounted
         // to avoid corrupting the filesystem when selftests.py is removed.
-        exec_boot_script("/selftest.py", true, false);
+        exec_boot_script("/selftest.py", true, false, false);
         #endif
     }
 
@@ -672,17 +705,19 @@ soft_reset:
     led_state(LED_GREEN, 0);
     led_state(LED_BLUE, 0);
 
-    if (openmv_config.wifidbg == true) {
-        timer_tim5_init(100);
-    }
-
     // Run main script if it exists.
     if (first_soft_reset) {
-        exec_boot_script("/main.py", false, true);
+        exec_boot_script("/main.py", false, true, openmv_config.wifidbg);
     }
 
     do {
         usbdbg_init();
+
+        if (openmv_config.wifidbg == true) {
+            // Need to reinit imlib in WiFi debug mode.
+            imlib_deinit_all();
+            imlib_init_all();
+        }
 
         // If there's no script ready, just re-exec REPL
         while (!usbdbg_script_ready()) {
@@ -691,6 +726,9 @@ soft_reset:
             if (nlr_push(&nlr) == 0) {
                 // enable IDE interrupt
                 usbdbg_set_irq_enabled(true);
+                #if OMV_ENABLE_WIFIDBG && MICROPY_PY_WINC1500
+                wifidbg_set_irq_enabled(openmv_config.wifidbg);
+                #endif
 
                 // run REPL
                 if (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL) {
@@ -712,6 +750,9 @@ soft_reset:
             if (nlr_push(&nlr) == 0) {
                 // Enable IDE interrupt
                 usbdbg_set_irq_enabled(true);
+                #if OMV_ENABLE_WIFIDBG && MICROPY_PY_WINC1500
+                wifidbg_set_irq_enabled(openmv_config.wifidbg);
+                #endif
 
                 // Execute the script.
                 pyexec_str(usbdbg_get_script());
@@ -722,12 +763,23 @@ soft_reset:
         }
     } while (openmv_config.wifidbg == true);
 
+    usbdbg_wait_for_command(1000);
+
+    #if MICROPY_PY_LWIP
+    // Must call GC sweep here to close open sockets.
+    gc_sweep_all();
+    systick_disable_dispatch(SYSTICK_DISPATCH_LWIP);
+    #endif
+
     // Disable all other IRQs except Systick and Flash IRQs
     // Note: FS IRQ is disable, since we're going for a soft-reset.
     irq_set_base_priority(IRQ_PRI_FLASH+1);
 
     // soft reset
     storage_flush();
+    #if MICROPY_PY_BLUETOOTH
+    mp_bluetooth_deinit();
+    #endif
     mod_network_deinit();
     timer_deinit();
     i2c_deinit_all();
@@ -742,9 +794,7 @@ soft_reset:
     #if MICROPY_PY_AUDIO
     py_audio_deinit();
     #endif
-    #ifdef IMLIB_ENABLE_DMA2D
-    imlib_draw_row_deinit_all();
-    #endif
+    imlib_deinit_all();
     first_soft_reset = false;
     goto soft_reset;
 }

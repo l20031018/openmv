@@ -94,6 +94,7 @@ FIRM_OBJ += $(addprefix $(BUILD)/$(OMV_DIR)/alloc/, \
 	xalloc.o                    \
 	fb_alloc.o                  \
 	umm_malloc.o                \
+	dma_alloc.o                 \
 	unaligned_memcpy.o          \
    )
 
@@ -110,10 +111,12 @@ FIRM_OBJ += $(addprefix $(BUILD)/$(OMV_DIR)/common/, \
 FIRM_OBJ += $(addprefix $(BUILD)/$(OMV_DIR)/sensors/,   \
 	ov2640.o                    \
 	ov5640.o                    \
+	ov7670.o                    \
 	ov7690.o                    \
 	ov7725.o                    \
 	ov9650.o                    \
 	mt9v034.o                   \
+	mt9m114.o                   \
 	lepton.o                    \
 	hm01b0.o                    \
    )
@@ -134,6 +137,7 @@ FIRM_OBJ += $(addprefix $(BUILD)/$(OMV_DIR)/modules/,   \
 FIRM_OBJ += $(addprefix $(BUILD)/$(OMV_DIR)/imlib/, \
 	agast.o                     \
 	apriltag.o                  \
+	bayer.o                     \
 	binary.o                    \
 	blob.o                      \
 	bmp.o                       \
@@ -179,7 +183,6 @@ FIRM_OBJ += $(addprefix $(BUILD)/$(OMV_DIR)/imlib/, \
 	stats.o                     \
 	template.o                  \
 	xyz_tab.o                   \
-	yuv_tab.o                   \
 	zbar.o                      \
    )
 
@@ -296,18 +299,27 @@ FIRM_OBJ += $(addprefix $(BUILD)/$(MICROPY_DIR)/modules/,\
 
 ifeq ($(MICROPY_PY_ULAB), 1)
 FIRM_OBJ += $(addprefix $(BUILD)/$(MICROPY_DIR)/extmod/ulab/,\
-	code/fft.o          \
-	code/linalg.o       \
-	code/ndarray.o      \
-	code/numerical.o    \
-	code/poly.o         \
-	code/ulab.o         \
-	code/vectorise.o    \
-	code/create.o    	\
-	code/approx.o		\
-	code/filter.o		\
-	code/compare.o		\
-	code/extras.o		\
+	code/scipy/optimize/optimize.o      \
+	code/scipy/signal/signal.o          \
+	code/scipy/special/special.o        \
+	code/ndarray_operators.o            \
+	code/ulab_tools.o                   \
+	code/ndarray.o                      \
+	code/numpy/approx/approx.o          \
+	code/numpy/compare/compare.o        \
+	code/ulab_create.o                  \
+	code/numpy/fft/fft.o                \
+	code/numpy/fft/fft_tools.o          \
+	code/numpy/filter/filter.o          \
+	code/numpy/linalg/linalg.o          \
+	code/numpy/linalg/linalg_tools.o    \
+	code/numpy/numerical/numerical.o    \
+	code/numpy/poly/poly.o              \
+	code/numpy/vector/vector.o          \
+	code/user/user.o                    \
+	code/numpy/numpy.o                  \
+	code/scipy/scipy.o                  \
+	code/ulab.o                         \
 	)
 endif
 

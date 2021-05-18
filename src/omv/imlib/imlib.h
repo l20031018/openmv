@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -27,6 +27,7 @@
 #include "fmath.h"
 #include "collections.h"
 #include "imlib_config.h"
+#include "omv_boardconfig.h"
 
 #define IM_LOG2_2(x)    (((x) &                0x2ULL) ? ( 2                        ) :             1) // NO ({ ... }) !
 #define IM_LOG2_4(x)    (((x) &                0xCULL) ? ( 2 +  IM_LOG2_2((x) >>  2)) :  IM_LOG2_2(x)) // NO ({ ... }) !
@@ -274,83 +275,40 @@ color_thresholds_list_lnk_data_t;
     (__rb_pixel * 0x0801) + ((__pixel << 3) & 0x7E0); \
 })
 
-extern const int8_t lab_table[196608];
-extern const int8_t yuv_table[196608];
+#define COLOR_RGB888_TO_U(r8, g8, b8) ((((r8) * -21) - ((g8) * 43) + ((b8) * 64)) >> 7) // -0.168736R - 0.331264G + 0.5B
+#define COLOR_RGB565_TO_U(rgb565) \
+({ \
+    __typeof__ (rgb565) __rgb565 = (rgb565); \
+    int r = COLOR_RGB565_TO_R8(__rgb565); \
+    int g = COLOR_RGB565_TO_G8(__rgb565); \
+    int b = COLOR_RGB565_TO_B8(__rgb565); \
+    COLOR_RGB888_TO_U(r, g, b); \
+})
+
+#define COLOR_RGB888_TO_V(r8, g8, b8) ((((r8) * 64) - ((g8) * 54) - ((b8) * 10)) >> 7) // 0.5R - 0.418688G - 0.081312B
+#define COLOR_RGB565_TO_V(rgb565) \
+({ \
+    __typeof__ (rgb565) __rgb565 = (rgb565); \
+    int r = COLOR_RGB565_TO_R8(__rgb565); \
+    int g = COLOR_RGB565_TO_G8(__rgb565); \
+    int b = COLOR_RGB565_TO_B8(__rgb565); \
+    COLOR_RGB888_TO_V(r, g, b); \
+})
+
+extern const int8_t lab_table[196608/2];
 
 #ifdef IMLIB_ENABLE_LAB_LUT
-#define COLOR_RGB565_TO_L(pixel) lab_table[(pixel) * 3]
-#define COLOR_RGB565_TO_A(pixel) lab_table[((pixel) * 3) + 1]
-#define COLOR_RGB565_TO_B(pixel) lab_table[((pixel) * 3) + 2]
+#define COLOR_RGB565_TO_L(pixel) lab_table[((pixel>>1) * 3) + 0]
+#define COLOR_RGB565_TO_A(pixel) lab_table[((pixel>>1) * 3) + 1]
+#define COLOR_RGB565_TO_B(pixel) lab_table[((pixel>>1) * 3) + 2]
 #else
 #define COLOR_RGB565_TO_L(pixel) imlib_rgb565_to_l(pixel)
 #define COLOR_RGB565_TO_A(pixel) imlib_rgb565_to_a(pixel)
 #define COLOR_RGB565_TO_B(pixel) imlib_rgb565_to_b(pixel)
 #endif
 
-#ifdef IMLIB_ENABLE_YUV_LUT
-#define COLOR_RGB565_TO_U(pixel) yuv_table[((pixel) * 3) + 1]
-#define COLOR_RGB565_TO_V(pixel) yuv_table[((pixel) * 3) + 2]
-#else
-#define COLOR_RGB565_TO_U(pixel) imlib_rgb565_to_u(pixel)
-#define COLOR_RGB565_TO_V(pixel) imlib_rgb565_to_v(pixel)
-#endif
-
 #define COLOR_LAB_TO_RGB565(l, a, b) imlib_lab_to_rgb(l, a, b)
 #define COLOR_YUV_TO_RGB565(y, u, v) imlib_yuv_to_rgb((y) + 128, u, v)
-
-#define COLOR_BAYER_TO_RGB565(img, x, y, r, g, b)            \
-({                                                           \
-    __typeof__ (x) __x = (x);                                \
-    __typeof__ (y) __y = (y);                                \
-    if ((__y % 2) == 0) {                                    \
-        if ((__x % 2) == 0) {                                \
-            r = (IM_GET_RAW_PIXEL(img, __x-1, __y-1)  +      \
-                 IM_GET_RAW_PIXEL(img, __x+1, __y-1)  +      \
-                 IM_GET_RAW_PIXEL(img, __x-1, __y+1)  +      \
-                 IM_GET_RAW_PIXEL(img, __x+1, __y+1)) >> 2;  \
-                                                             \
-            g = (IM_GET_RAW_PIXEL(img, __x,   __y-1)  +      \
-                 IM_GET_RAW_PIXEL(img, __x,   __y+1)  +      \
-                 IM_GET_RAW_PIXEL(img, __x-1, __y)    +      \
-                 IM_GET_RAW_PIXEL(img, __x+1, __y))   >> 2;  \
-                                                             \
-            b = IM_GET_RAW_PIXEL(img,  __x, __y);            \
-        } else {                                             \
-            r = (IM_GET_RAW_PIXEL(img, __x, __y-1)  +        \
-                 IM_GET_RAW_PIXEL(img, __x, __y+1)) >> 1;    \
-                                                             \
-            b = (IM_GET_RAW_PIXEL(img, __x-1, __y)  +        \
-                 IM_GET_RAW_PIXEL(img, __x+1, __y)) >> 1;    \
-                                                             \
-            g =  IM_GET_RAW_PIXEL(img, __x, __y);            \
-        }                                                    \
-    } else {                                                 \
-        if ((__x % 2) == 0) {                                \
-            r = (IM_GET_RAW_PIXEL(img, __x-1, __y)  +        \
-                 IM_GET_RAW_PIXEL(img, __x+1, __y)) >> 1;    \
-                                                             \
-            g =  IM_GET_RAW_PIXEL(img, __x, __y);            \
-                                                             \
-            b = (IM_GET_RAW_PIXEL(img, __x, __y-1)  +        \
-                 IM_GET_RAW_PIXEL(img, __x, __y+1)) >> 1;    \
-        } else {                                             \
-            r = IM_GET_RAW_PIXEL(img,  __x, __y);            \
-                                                             \
-            g = (IM_GET_RAW_PIXEL(img, __x, __y-1)    +      \
-                 IM_GET_RAW_PIXEL(img, __x, __y+1)    +      \
-                 IM_GET_RAW_PIXEL(img, __x-1, __y)    +      \
-                 IM_GET_RAW_PIXEL(img, __x+1, __y))   >> 2;  \
-                                                             \
-            b = (IM_GET_RAW_PIXEL(img, __x-1, __y-1)  +      \
-                 IM_GET_RAW_PIXEL(img, __x+1, __y-1)  +      \
-                 IM_GET_RAW_PIXEL(img, __x-1, __y+1)  +      \
-                 IM_GET_RAW_PIXEL(img, __x+1, __y+1)) >> 2;  \
-        }                                                    \
-    }                                                        \
-    r  = r >> 3;                                             \
-    g  = g >> 2;                                             \
-    b  = b >> 3;                                             \
-})
 
 #define COLOR_BINARY_TO_GRAYSCALE(pixel) ((pixel) * COLOR_GRAYSCALE_MAX)
 #define COLOR_BINARY_TO_RGB565(pixel) COLOR_YUV_TO_RGB565(((pixel) ? 127 : -128), 0, 0)
@@ -422,6 +380,24 @@ bool image_get_mask_pixel(image_t *ptr, int x, int y);
     (_image->bpp == IMAGE_BPP_GRAYSCALE) || \
     (_image->bpp == IMAGE_BPP_RGB565) || \
     (_image->bpp == IMAGE_BPP_BAYER); \
+})
+
+#define IMAGE_IS_MUTABLE_BAYER_JPEG(image) \
+({ \
+    __typeof__ (image) _image = (image); \
+    (_image->bpp == IMAGE_BPP_BINARY) || \
+    (_image->bpp == IMAGE_BPP_GRAYSCALE) || \
+    (_image->bpp == IMAGE_BPP_RGB565) || \
+    (_image->bpp == IMAGE_BPP_BAYER) || \
+    (_image->bpp >= IMAGE_BPP_JPEG); \
+})
+
+#define IMAGE_IS_COLOR(image) \
+({ \
+    __typeof__ (image) _image = (image); \
+    (_image->bpp == IMAGE_BPP_RGB565) || \
+    (_image->bpp == IMAGE_BPP_BAYER) || \
+    (_image->bpp >= IMAGE_BPP_JPEG); \
 })
 
 #define IMAGE_BINARY_LINE_LEN(image) (((image)->w + UINT32_T_MASK) >> UINT32_T_SHIFT)
@@ -594,37 +570,8 @@ extern const int8_t kernel_gauss_5[25];
 extern const int kernel_laplacian_3[9];
 extern const int kernel_high_pass_3[9];
 
-#define IM_RGB5652L(p) \
-    ({ __typeof__ (p) _p = (p); \
-       lab_table[_p * 3]; })
-
-#define IM_RGB5652A(p) \
-    ({ __typeof__ (p) _p = (p); \
-       lab_table[(_p * 3) + 1]; })
-
-#define IM_RGB5652B(p) \
-    ({ __typeof__ (p) _p = (p); \
-       lab_table[(_p * 3) + 2]; })
-
 // Grayscale maxes
 #define IM_MAX_GS (255)
-
-// RGB565 maxes
-#define IM_MAX_R5 (31)
-#define IM_MAX_G6 (63)
-#define IM_MAX_B5 (31)
-
-// Grayscale histogram
-#define IM_G_HIST_SIZE (256)
-#define IM_G_HIST_OFFSET (0)
-
-// LAB histogram
-#define IM_L_HIST_SIZE (256)
-#define IM_L_HIST_OFFSET (0)
-#define IM_A_HIST_SIZE (256)
-#define IM_A_HIST_OFFSET (256)
-#define IM_B_HIST_SIZE (256)
-#define IM_B_HIST_OFFSET (512)
 
 #define IM_IS_BINARY(img) \
     ({ __typeof__ (img) _img = (img); \
@@ -646,10 +593,6 @@ extern const int kernel_high_pass_3[9];
     ({ __typeof__ (img) _img = (img); \
        _img->bpp >= 4; })
 
-#define IM_IS_MUTABLE(img) \
-    ({ __typeof__ (img) _img = (img); \
-       (_img->bpp == 1 || _img->bpp == 2); })
-
 #define IM_X_INSIDE(img, x) \
     ({ __typeof__ (img) _img = (img); \
        __typeof__ (x) _x = (x); \
@@ -664,34 +607,6 @@ extern const int kernel_high_pass_3[9];
     ({ __typeof__ (img) _img = (img); \
        __typeof__ (x) _x = (x); \
        __typeof__ (y) _y = (y); \
-       ((uint8_t*)_img->pixels)[(_y*_img->w)+_x]; })
-
-#define IM_GET_RAW_PIXEL(img, x, y) \
-    ({ __typeof__ (img) _img = (img); \
-       __typeof__ (x) _x = (x); \
-       __typeof__ (y) _y = (y); \
-       ((uint8_t*)_img->pixels)[(_y*_img->w)+_x]; })
-
-#define IM_GET_RAW_PIXEL_CHECK_BOUNDS_X(img, x, y) \
-    ({ __typeof__ (img) _img = (img); \
-       __typeof__ (x) _x = (x); \
-       __typeof__ (y) _y = (y); \
-       _x = (_x < 0) ? 0 : (_x >= img->w) ? (img->w -1): _x; \
-       ((uint8_t*)_img->pixels)[(_y*_img->w)+_x]; })
-
-#define IM_GET_RAW_PIXEL_CHECK_BOUNDS_Y(img, x, y) \
-    ({ __typeof__ (img) _img = (img); \
-       __typeof__ (x) _x = (x); \
-       __typeof__ (y) _y = (y); \
-       _y = (_y < 0) ? 0 : (_y >= img->h) ? (img->h -1): _y; \
-       ((uint8_t*)_img->pixels)[(_y*_img->w)+_x]; })
-
-#define IM_GET_RAW_PIXEL_CHECK_BOUNDS_XY(img, x, y) \
-    ({ __typeof__ (img) _img = (img); \
-       __typeof__ (x) _x = (x); \
-       __typeof__ (y) _y = (y); \
-       _x = (_x < 0) ? 0 : (_x >= img->w) ? (img->w -1): _x; \
-       _y = (_y < 0) ? 0 : (_y >= img->h) ? (img->h -1): _y; \
        ((uint8_t*)_img->pixels)[(_y*_img->w)+_x]; })
 
 #define IM_GET_RGB565_PIXEL(img, x, y) \
@@ -1031,23 +946,28 @@ typedef struct imlib_draw_row_data {
 
 typedef void (*imlib_draw_row_callback_t)(int x_start, int x_end, int y_row, imlib_draw_row_data_t *data);
 
+// Library Hardware Init
+void imlib_init_all();
+void imlib_deinit_all();
+
 // Generic Helper Functions
 void imlib_fill_image_from_float(image_t *img, int w, int h, float *data, float min, float max,
                                  bool mirror, bool flip, bool dst_transpose, bool src_transpose);
+
+// Bayer Image Processing
+void imlib_debayer_line_to_binary(int x_start, int x_end, int y_row, uint32_t *dst_row_ptr, image_t *src);
+void imlib_debayer_image_to_binary(image_t *dst, image_t *src);
+void imlib_debayer_line_to_grayscale(int x_start, int x_end, int y_row, uint8_t *dst_row_ptr, image_t *src);
+void imlib_debayer_image_to_grayscale(image_t *dst, image_t *src);
+void imlib_debayer_line_to_rgb565(int x_start, int x_end, int y_row, uint16_t *dst_row_ptr, image_t *src);
+void imlib_debayer_image_to_rgb565(image_t *dst, image_t *src);
 
 /* Color space functions */
 int8_t imlib_rgb565_to_l(uint16_t pixel);
 int8_t imlib_rgb565_to_a(uint16_t pixel);
 int8_t imlib_rgb565_to_b(uint16_t pixel);
-int8_t imlib_rgb565_to_y(uint16_t pixel);
-int8_t imlib_rgb565_to_u(uint16_t pixel);
-int8_t imlib_rgb565_to_v(uint16_t pixel);
 uint16_t imlib_lab_to_rgb(uint8_t l, int8_t a, int8_t b);
 uint16_t imlib_yuv_to_rgb(uint8_t y, int8_t u, int8_t v);
-void imlib_bayer_to_rgb565(image_t *img, int w, int h, int xoffs, int yoffs, uint16_t *rgbbuf);
-void imlib_bayer_to_y(image_t *img, int x_offset, int y_offset, int width, uint8_t *Y);
-void imlib_bayer_to_binary(image_t *img, int x_offset, int y_offset, int width, uint8_t *binary);
-bool imlib_pixel_to_binary(int bpp, uint32_t pixel);
 
 /* Image file functions */
 void ppm_read_geometry(FIL *fp, image_t *img, const char *path, ppm_read_settings_t *rs);
@@ -1058,7 +978,12 @@ bool bmp_read_geometry(FIL *fp, image_t *img, const char *path, bmp_read_setting
 void bmp_read_pixels(FIL *fp, image_t *img, int n_lines, bmp_read_settings_t *rs);
 void bmp_read(image_t *img, const char *path);
 void bmp_write_subimg(image_t *img, const char *path, rectangle_t *r);
+#if (OMV_HARDWARE_JPEG == 1)
+void imlib_jpeg_compress_init();
+void imlib_jpeg_compress_deinit();
+#endif
 bool jpeg_compress(image_t *src, image_t *dst, int quality, bool realloc);
+int jpeg_clean_trailing_bytes(int bpp, uint8_t *data);
 void jpeg_read_geometry(FIL *fp, image_t *img, const char *path, jpg_read_settings_t *rs);
 void jpeg_read_pixels(FIL *fp, image_t *img);
 void jpeg_read(image_t *img, const char *path);

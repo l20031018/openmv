@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -126,7 +126,7 @@
 #endif
 
 // Enable FAST (20+ KBs).
-#define IMLIB_ENABLE_FAST
+//#define IMLIB_ENABLE_FAST
 
 // Enable find_template()
 #define IMLIB_FIND_TEMPLATE
@@ -141,10 +141,10 @@
 #define IMLIB_ENABLE_DESCRIPTOR
 
 // Enable find_hog()
-#define IMLIB_ENABLE_HOG
+//#define IMLIB_ENABLE_HOG
 
 // Enable selective_search()
-#define IMLIB_ENABLE_SELECTIVE_SEARCH
+//#define IMLIB_ENABLE_SELECTIVE_SEARCH
 
 // Enable STM32 DMA2D
 #define IMLIB_ENABLE_DMA2D

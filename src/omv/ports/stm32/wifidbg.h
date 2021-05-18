@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -21,7 +21,9 @@ typedef struct wifidbg_config {
     char board_name[WINC_MAX_BOARD_NAME_LEN + 1];
 } wifidbg_config_t;
 
-int wifidbg_init(wifidbg_config_t *config);
 void wifidbg_dispatch();
-
+void wifidbg_pendsv_callback(void);
+void wifidbg_systick_callback(uint32_t ticks_ms);
+int wifidbg_init(wifidbg_config_t *config);
+void wifidbg_set_irq_enabled(bool enable);
 #endif /* __WIFIDBG_H__ */

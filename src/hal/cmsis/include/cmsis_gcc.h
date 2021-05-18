@@ -113,6 +113,9 @@
 #ifndef   __RESTRICT
   #define __RESTRICT                             __restrict
 #endif
+#ifndef   __COMPILER_BARRIER
+  #define __COMPILER_BARRIER()                   __ASM volatile("":::"memory")
+#endif
 
 
 /* ###########################  Core Function Access  ########################### */
@@ -572,6 +575,8 @@ __STATIC_FORCEINLINE void __TZ_set_FAULTMASK_NS(uint32_t faultMask)
 }
 #endif
 
+#else
+#define __set_BASEPRI(basePri)
 #endif /* ((defined (__ARM_ARCH_7M__      ) && (__ARM_ARCH_7M__      == 1)) || \
            (defined (__ARM_ARCH_7EM__     ) && (__ARM_ARCH_7EM__     == 1)) || \
            (defined (__ARM_ARCH_8M_MAIN__ ) && (__ARM_ARCH_8M_MAIN__ == 1))    ) */
@@ -1349,6 +1354,34 @@ __STATIC_FORCEINLINE int32_t __SSAT(int32_t val, uint32_t sat)
 }
 
 /**
+  \brief   Signed Saturate
+  \details Saturates a signed value.
+  \param [in]  value  Value to be saturated
+  \param [in]    sat  Bit position to saturate to (1..32)
+  \param [in]  shift  Right shift (0..31)
+  \return             Saturated value
+ */
+__STATIC_FORCEINLINE int32_t __SSAT_ASR(int32_t val, uint32_t sat, uint32_t shift)
+{
+  val >>= shift & 0x1F;
+
+  if ((sat >= 1U) && (sat <= 32U))
+  {
+    const int32_t max = (int32_t)((1U << (sat - 1U)) - 1U);
+    const int32_t min = -1 - max ;
+    if (val > max)
+    {
+      return max;
+    }
+    else if (val < min)
+    {
+      return min;
+    }
+  }
+  return val;
+}
+
+/**
   \brief   Unsigned Saturate
   \details Saturates an unsigned value.
   \param [in]  value  Value to be saturated
@@ -1357,6 +1390,33 @@ __STATIC_FORCEINLINE int32_t __SSAT(int32_t val, uint32_t sat)
  */
 __STATIC_FORCEINLINE uint32_t __USAT(int32_t val, uint32_t sat)
 {
+  if (sat <= 31U)
+  {
+    const uint32_t max = ((1U << sat) - 1U);
+    if (val > (int32_t)max)
+    {
+      return max;
+    }
+    else if (val < 0)
+    {
+      return 0U;
+    }
+  }
+  return (uint32_t)val;
+}
+
+/**
+  \brief   Unsigned Saturate
+  \details Saturates an unsigned value.
+  \param [in]  value  Value to be saturated
+  \param [in]    sat  Bit position to saturate to (0..31)
+  \param [in]  shift  Right shift (0..31)
+  \return             Saturated value
+ */
+__STATIC_FORCEINLINE uint32_t __USAT_ASR(int32_t val, uint32_t sat, uint32_t shift)
+{
+  val >>= shift & 0x1F;
+
   if (sat <= 31U)
   {
     const uint32_t max = ((1U << sat) - 1U);
@@ -1889,6 +1949,22 @@ __STATIC_FORCEINLINE uint32_t __USADA8(uint32_t op1, uint32_t op2, uint32_t op3)
   __RES; \
  })
 
+__STATIC_FORCEINLINE uint32_t __UXTB(uint32_t op1)
+{
+  uint32_t result;
+
+  __ASM volatile ("uxtb %0, %1" : "=r" (result) : "r" (op1));
+  return(result);
+}
+
+__STATIC_FORCEINLINE uint32_t __UXTB_RORn(uint32_t op1, uint32_t rotate)
+{
+  uint32_t result;
+
+  __ASM volatile ("uxtb %0, %1, ROR %2" : "=r" (result) : "r" (op1), "i" (rotate) );
+  return result;
+}
+
 __STATIC_FORCEINLINE uint32_t __UXTB16(uint32_t op1)
 {
   uint32_t result;
@@ -1918,6 +1994,22 @@ __STATIC_FORCEINLINE uint32_t __UXTAB_RORn(uint32_t op1, uint32_t op2, uint32_t 
   uint32_t result;
 
   __ASM volatile ("uxtab %0, %1, %2, ROR %3" : "=r" (result) : "r" (op1), "r" (op2), "i" (rotate) );
+  return result;
+}
+
+__STATIC_FORCEINLINE uint32_t __SXTB(uint32_t op1)
+{
+  uint32_t result;
+
+  __ASM volatile ("sxtb %0, %1" : "=r" (result) : "r" (op1));
+  return(result);
+}
+
+__STATIC_FORCEINLINE uint32_t __SXTB_RORn(uint32_t op1, uint32_t rotate)
+{
+  uint32_t result;
+
+  __ASM volatile ("sxtb %0, %1, ROR %2" : "=r" (result) : "r" (op1), "i" (rotate) );
   return result;
 }
 
@@ -2142,9 +2234,25 @@ __STATIC_FORCEINLINE int32_t __SMMLA (int32_t op1, int32_t op2, int32_t op3)
  return(result);
 }
 
+#else
+
+__STATIC_FORCEINLINE uint32_t __UXTB(uint32_t op1)
+{
+  return op1 & 0xFF;
+}
+
+__STATIC_FORCEINLINE uint32_t __UXTB_RORn(uint32_t op1, uint32_t rotate)
+{
+  return (op1 >> rotate) & 0xFF;
+}
+
+__STATIC_FORCEINLINE uint32_t __SSUB16(uint32_t op1, uint32_t op2)
+{
+  return ((op1 & 0xFFFF0000) - (op2 & 0xFFFF0000)) | ((op1 - op2) & 0xFFFF);
+}
+
 #endif /* (__ARM_FEATURE_DSP == 1) */
 /*@} end of group CMSIS_SIMD_intrinsics */
-
 
 #pragma GCC diagnostic pop
 

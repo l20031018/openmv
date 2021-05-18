@@ -97,8 +97,13 @@ void SystemInit(void)
     #if (__FPU_PRESENT == 1) && (__FPU_USED == 1)
       SCB->CPACR |= ((3UL << 10*2)|(3UL << 11*2));  /* set CP10 and CP11 Full Access */
     #endif
-    /* Reset the RCC clock configuration to the default reset state ------------*/
 
+    /*SEVONPEND enabled so that an interrupt coming from the CPU(n) interrupt
+      signal is detectable by the CPU after a WFI/WFE instruction. */
+    //SCB->SCR |= SCB_SCR_SEVONPEND_Msk;
+
+    #if !defined(CORE_CM4)
+    /* Reset the RCC clock configuration to the default reset state ------------*/
     /* Set HSION bit */
     RCC->CR |= CONFIG_RCC_CR_1ST;
 
@@ -155,15 +160,9 @@ void SystemInit(void)
 
     #if defined(MCU_SERIES_H7)
     /* Change  the switch matrix read issuing capability to 1 for the AXI SRAM target (Target 7) */
+    // See Errata 2.2.9 "Reading from AXI SRAM may lead to data read corruption"
     *((__IO uint32_t*)0x51008108) = 0x00000001;
     #endif // defined(MCU_SERIES_H7)
-
-    /* Configure the Vector Table location add offset address ------------------*/
-    #ifdef VECT_TAB_SRAM
-    SCB->VTOR = SRAM_BASE | VECT_TAB_OFFSET; /* Vector Table Relocation in Internal SRAM */
-    #else
-    SCB->VTOR = FLASH_BASE | VECT_TAB_OFFSET; /* Vector Table Relocation in Internal FLASH */
-    #endif
 
     /* dpgeorge: enable 8-byte stack alignment for IRQ handlers, in accord with EABI */
     SCB->CCR |= SCB_CCR_STKALIGN_Msk;
@@ -176,6 +175,15 @@ void SystemInit(void)
     DBGMCU->CR |= DBGMCU_CR_DBG_STOPD1;
     DBGMCU->CR |= DBGMCU_CR_DBG_STANDBYD1;
     #endif
+    #endif
+
+    #endif // !defined(CORE_CM4)
+
+    /* Configure the Vector Table location add offset address ------------------*/
+    #ifdef VECT_TAB_SRAM
+    SCB->VTOR = SRAM_BASE | VECT_TAB_OFFSET; /* Vector Table Relocation in Internal SRAM */
+    #else
+    SCB->VTOR = FLASH_BASE | VECT_TAB_OFFSET; /* Vector Table Relocation in Internal FLASH */
     #endif
 }
 
@@ -216,6 +224,9 @@ void SystemClock_Config(void)
     }
     #endif
 
+    /* Macro to configure the PLL clock source */
+    __HAL_RCC_PLL_PLLSOURCE_CONFIG(OMV_OSC_PLL_CLKSOURCE);
+
     /* Enable HSE Oscillator and activate PLL with HSE as source */
     #if defined(OMV_OSC_HSE_STATE)
     RCC_OscInitStruct.HSEState = OMV_OSC_HSE_STATE;
@@ -224,6 +235,7 @@ void SystemClock_Config(void)
     #if defined(OMV_OSC_HSI_STATE)
     RCC_OscInitStruct.HSIState = OMV_OSC_HSI_STATE;
     RCC_OscInitStruct.OscillatorType |= RCC_OSCILLATORTYPE_HSI;
+    RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
     #endif
     #if defined(OMV_OSC_CSI_STATE)
     RCC_OscInitStruct.CSIState = OMV_OSC_CSI_STATE;
@@ -235,7 +247,7 @@ void SystemClock_Config(void)
     #endif
 
     RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+    RCC_OscInitStruct.PLL.PLLSource = OMV_OSC_PLL_CLKSOURCE;
     RCC_OscInitStruct.PLL.PLLM = OMV_OSC_PLL1M;
     RCC_OscInitStruct.PLL.PLLN = OMV_OSC_PLL1N;
     RCC_OscInitStruct.PLL.PLLQ = OMV_OSC_PLL1Q;
@@ -360,5 +372,10 @@ void SystemClock_Config(void)
 
     // Enable the USB voltage level detector
     HAL_PWREx_EnableUSBVoltageDetector();
+    #endif
+
+    #if defined(CORE_CM7) && defined(M4_APP_ADDR)
+    HAL_SYSCFG_CM4BootAddConfig(SYSCFG_BOOT_ADDR0, M4_APP_ADDR);
+    HAL_RCCEx_EnableBootCore(RCC_BOOT_C2);
     #endif
 }

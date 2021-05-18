@@ -17,7 +17,7 @@
 #include "softtimer.h"
 #include "systick.h"
 
-#include "imlib.h"
+#include "py_helper.h"
 #include "omv_boardconfig.h"
 #include STM32_HAL_H
 
@@ -33,8 +33,8 @@
 #if (OMV_ENABLE_FIR_LEPTON == 1)
 
 #define FRAMEBUFFER_COUNT 3
-static volatile int framebuffer_head = 0;
-static int framebuffer_tail = 0;
+static volatile int framebuffer_tail = 0;
+static int framebuffer_head = 0;
 static uint16_t *framebuffers[FRAMEBUFFER_COUNT] = {};
 
 static int fir_lepton_rad_en = false;
@@ -55,27 +55,27 @@ static DMA_HandleTypeDef fir_lepton_spi_rx_dma = {};
 #define VOSPI_SEG_SIZE_PIXELS   (VOSPI_PIDS_PER_SEG * VOSPI_PID_SIZE_PIXELS) // 16-bits
 
 #define VOSPI_BUFFER_SIZE       (VOSPI_PACKET_SIZE * 2) // 16-bits
-#define VOSPI_CLOCK_SPEED       10000000 // hz
+#define VOSPI_CLOCK_SPEED       20000000 // hz
 #define VOSPI_SYNC_MS           200 // ms
 
 static soft_timer_entry_t flir_lepton_spi_rx_timer = {};
-static int fir_lepton_spi_rx_cb_head = 0;
+static int fir_lepton_spi_rx_cb_tail = 0;
 static int fir_lepton_spi_rx_cb_expected_pid = 0;
 static int fir_lepton_spi_rx_cb_expected_seg = 0;
-static uint16_t *fir_lepton_spi_rx_cb_dma_buffer = NULL;
+extern int _fir_lepton_buf[];
 
 STATIC mp_obj_t fir_lepton_spi_resync_callback(mp_obj_t unused)
 {
-    // For triple buffering we are never drawing where head or tail
-    // (which may instantly update to be equal to head) is.
-    fir_lepton_spi_rx_cb_head = (framebuffer_head + 1) % FRAMEBUFFER_COUNT;
-    if (fir_lepton_spi_rx_cb_head == framebuffer_tail) {
-        fir_lepton_spi_rx_cb_head = (fir_lepton_spi_rx_cb_head + 1) % FRAMEBUFFER_COUNT;
+    // For triple buffering we are never drawing where tail or head
+    // (which may instantly update to be equal to tail) is.
+    fir_lepton_spi_rx_cb_tail = (framebuffer_tail + 1) % FRAMEBUFFER_COUNT;
+    if (fir_lepton_spi_rx_cb_tail == framebuffer_head) {
+        fir_lepton_spi_rx_cb_tail = (fir_lepton_spi_rx_cb_tail + 1) % FRAMEBUFFER_COUNT;
     }
 
     OMV_FIR_LEPTON_CS_LOW();
     HAL_SPI_Receive_DMA(OMV_FIR_LEPTON_CONTROLLER->spi,
-            (uint8_t *) fir_lepton_spi_rx_cb_dma_buffer,
+            (uint8_t *) &_fir_lepton_buf,
             VOSPI_BUFFER_SIZE);
 
     return mp_const_none;
@@ -111,12 +111,10 @@ static bool fir_lepton_spi_check_crc(const uint16_t *base)
 }
 #endif
 
+static mp_obj_t fir_lepton_frame_cb = mp_const_none;
+
 void fir_lepton_spi_callback(const uint16_t *base)
 {
-    #if defined(MCU_SERIES_F7) || defined(MCU_SERIES_H7)
-    SCB_InvalidateDCache_by_Addr((uint32_t *) base, VOSPI_PACKET_SIZE * sizeof(uint16_t));
-    #endif
-
     int id = base[0];
 
     // Ignore don't care packets.
@@ -152,7 +150,7 @@ void fir_lepton_spi_callback(const uint16_t *base)
         return;
     }
 
-    memcpy(framebuffers[fir_lepton_spi_rx_cb_head]
+    memcpy(framebuffers[fir_lepton_spi_rx_cb_tail]
         + (fir_lepton_spi_rx_cb_expected_pid * VOSPI_PID_SIZE_PIXELS)
         + (fir_lepton_spi_rx_cb_expected_seg * VOSPI_SEG_SIZE_PIXELS),
         base + VOSPI_HEADER_WORDS, VOSPI_PID_SIZE_PIXELS * sizeof(uint16_t));
@@ -176,14 +174,19 @@ void fir_lepton_spi_callback(const uint16_t *base)
         }
 
         if (frame_ready) {
-            // Update head which means a new image is ready.
-            framebuffer_head = fir_lepton_spi_rx_cb_head;
+            // Update tail which means a new image is ready.
+            framebuffer_tail = fir_lepton_spi_rx_cb_tail;
 
-            // For triple buffering we are never drawing where head or tail
-            // (which may instantly update to be equal to head) is.
-            fir_lepton_spi_rx_cb_head = (fir_lepton_spi_rx_cb_head + 1) % FRAMEBUFFER_COUNT;
-            if (fir_lepton_spi_rx_cb_head == framebuffer_tail) {
-                fir_lepton_spi_rx_cb_head = (fir_lepton_spi_rx_cb_head + 1) % FRAMEBUFFER_COUNT;
+            // For triple buffering we are never drawing where tail or head
+            // (which may instantly update to be equal to tail) is.
+            fir_lepton_spi_rx_cb_tail = (fir_lepton_spi_rx_cb_tail + 1) % FRAMEBUFFER_COUNT;
+            if (fir_lepton_spi_rx_cb_tail == framebuffer_head) {
+                fir_lepton_spi_rx_cb_tail = (fir_lepton_spi_rx_cb_tail + 1) % FRAMEBUFFER_COUNT;
+            }
+
+            // User should use micropython.schedule() in their callback to process the new frame.
+            if (fir_lepton_frame_cb != mp_const_none) {
+                mp_call_function_0(fir_lepton_frame_cb);
             }
         }
     }
@@ -191,12 +194,12 @@ void fir_lepton_spi_callback(const uint16_t *base)
 
 static void fir_lepton_spi_callback_half(SPI_HandleTypeDef *hspi)
 {
-    fir_lepton_spi_callback(fir_lepton_spi_rx_cb_dma_buffer);
+    fir_lepton_spi_callback((uint16_t *) &_fir_lepton_buf);
 }
 
 static void fir_lepton_spi_callback_full(SPI_HandleTypeDef *hspi)
 {
-    fir_lepton_spi_callback(fir_lepton_spi_rx_cb_dma_buffer + VOSPI_PACKET_SIZE);
+    fir_lepton_spi_callback(((uint16_t *) &_fir_lepton_buf) + VOSPI_PACKET_SIZE);
 }
 
 #if defined(OMV_FIR_LEPTON_VSYNC_PRESENT)
@@ -269,7 +272,7 @@ int fir_lepton_init(cambus_t *bus, int *w, int *h, int *refresh, int *resolution
     // Do not put in HAL_SPI_MspInit as other modules share the SPI2/3 bus.
 
     GPIO_InitTypeDef GPIO_InitStructure;
-    GPIO_InitStructure.Pull      = GPIO_NOPULL;
+    GPIO_InitStructure.Pull      = GPIO_PULLUP;
     GPIO_InitStructure.Mode      = GPIO_MODE_AF_PP;
     GPIO_InitStructure.Speed     = GPIO_SPEED_FREQ_MEDIUM;
 
@@ -309,7 +312,7 @@ int fir_lepton_init(cambus_t *bus, int *w, int *h, int *refresh, int *resolution
     int period = (tclk / OMV_FIR_LEPTON_MCLK_FREQ) - 1;
 
     // GPIO_InitTypeDef GPIO_InitStructure;
-    GPIO_InitStructure.Pull = GPIO_NOPULL;
+    GPIO_InitStructure.Pull = GPIO_PULLUP;
     GPIO_InitStructure.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStructure.Speed = GPIO_SPEED_FREQ_MEDIUM;
     GPIO_InitStructure.Alternate = OMV_FIR_LEPTON_MCLK_ALT;
@@ -317,17 +320,21 @@ int fir_lepton_init(cambus_t *bus, int *w, int *h, int *refresh, int *resolution
     HAL_GPIO_Init(OMV_FIR_LEPTON_MCLK_PORT, &GPIO_InitStructure);
 
     fir_lepton_mclk_tim_handle.Instance = OMV_FIR_LEPTON_MCLK_TIM;
-    fir_lepton_mclk_tim_handle.Init.Period = period;
-    fir_lepton_mclk_tim_handle.Init.Prescaler = TIM_ETRPRESCALER_DIV1;
+    fir_lepton_mclk_tim_handle.Init.Prescaler = 0;
     fir_lepton_mclk_tim_handle.Init.CounterMode = TIM_COUNTERMODE_UP;
+    fir_lepton_mclk_tim_handle.Init.Period = period;
     fir_lepton_mclk_tim_handle.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    fir_lepton_mclk_tim_handle.Init.RepetitionCounter = 0;
+    fir_lepton_mclk_tim_handle.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
 
     TIM_OC_InitTypeDef fir_lepton_mclk_tim_oc_handle;
     fir_lepton_mclk_tim_oc_handle.Pulse = period / 2;
     fir_lepton_mclk_tim_oc_handle.OCMode = TIM_OCMODE_PWM1;
     fir_lepton_mclk_tim_oc_handle.OCPolarity = TIM_OCPOLARITY_HIGH;
+    fir_lepton_mclk_tim_oc_handle.OCNPolarity = TIM_OCNPOLARITY_HIGH;
     fir_lepton_mclk_tim_oc_handle.OCFastMode = TIM_OCFAST_DISABLE;
     fir_lepton_mclk_tim_oc_handle.OCIdleState = TIM_OCIDLESTATE_RESET;
+    fir_lepton_mclk_tim_oc_handle.OCNIdleState = TIM_OCNIDLESTATE_RESET;
 
     OMV_FIR_LEPTON_MCLK_TIM_CLK_ENABLE();
     HAL_TIM_PWM_Init(&fir_lepton_mclk_tim_handle);
@@ -436,30 +443,13 @@ int fir_lepton_init(cambus_t *bus, int *w, int *h, int *refresh, int *resolution
 
     fb_alloc_mark();
 
-    framebuffer_head = 0;
     framebuffer_tail = 0;
+    framebuffer_head = 0;
 
     for (int i = 0; i < FRAMEBUFFER_COUNT; i++) {
         framebuffers[i] = (uint16_t *) fb_alloc0(flir_w * flir_h * sizeof(uint16_t),
                                                  FB_ALLOC_NO_HINT);
     }
-
-    size_t size = VOSPI_BUFFER_SIZE * sizeof(uint16_t);
-
-    // The DMA buffer must not start/end partially on a cache line.
-    #if defined(MCU_SERIES_F7) || defined(MCU_SERIES_H7)
-    size = ((size + __SCB_DCACHE_LINE_SIZE - 1) / __SCB_DCACHE_LINE_SIZE) * __SCB_DCACHE_LINE_SIZE;
-    size += __SCB_DCACHE_LINE_SIZE;
-    #endif
-
-    fir_lepton_spi_rx_cb_dma_buffer = (uint16_t *) fb_alloc(size, FB_ALLOC_PREFER_SPEED);
-
-    #if defined(MCU_SERIES_F7) || defined(MCU_SERIES_H7)
-    int offset = ((uint32_t) fir_lepton_spi_rx_cb_dma_buffer) % __SCB_DCACHE_LINE_SIZE;
-    if (offset) {
-        fir_lepton_spi_rx_cb_dma_buffer += __SCB_DCACHE_LINE_SIZE - offset;
-    }
-    #endif
 
     dma_init(&fir_lepton_spi_rx_dma,
              OMV_FIR_LEPTON_CONTROLLER->rx_dma_descr,
@@ -469,13 +459,27 @@ int fir_lepton_init(cambus_t *bus, int *w, int *h, int *refresh, int *resolution
     OMV_FIR_LEPTON_CONTROLLER->spi->hdmatx = NULL;
     OMV_FIR_LEPTON_CONTROLLER->spi->hdmarx = &fir_lepton_spi_rx_dma;
 
+    #if defined(MCU_SERIES_H7)
     fir_lepton_spi_rx_dma.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    #else
+    fir_lepton_spi_rx_dma.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+    #endif
+
     fir_lepton_spi_rx_dma.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+
     fir_lepton_spi_rx_dma.Init.Mode = DMA_CIRCULAR;
+    fir_lepton_spi_rx_dma.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+    fir_lepton_spi_rx_dma.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_1QUARTERFULL;
+    fir_lepton_spi_rx_dma.Init.MemBurst = DMA_MBURST_SINGLE;
+    fir_lepton_spi_rx_dma.Init.PeriphBurst = DMA_PBURST_SINGLE;
 
     ((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->CR =
         (((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->CR & ~DMA_SxCR_PSIZE_Msk) |
+        #if defined(MCU_SERIES_H7)
         DMA_PDATAALIGN_WORD;
+        #else
+        DMA_PDATAALIGN_HALFWORD;
+        #endif
 
     ((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->CR =
         (((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->CR & ~DMA_SxCR_MSIZE_Msk) |
@@ -484,6 +488,22 @@ int fir_lepton_init(cambus_t *bus, int *w, int *h, int *refresh, int *resolution
     ((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->CR =
         (((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->CR & ~DMA_SxCR_CIRC_Msk) |
         DMA_CIRCULAR;
+
+    ((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->FCR =
+        (((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->FCR & ~DMA_SxFCR_DMDIS_Msk) |
+        DMA_FIFOMODE_ENABLE;
+
+    ((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->FCR =
+        (((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->FCR & ~DMA_SxFCR_FTH_Msk) |
+        DMA_FIFO_THRESHOLD_1QUARTERFULL;
+
+    ((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->CR =
+        (((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->CR & ~DMA_SxCR_MBURST_Msk) |
+        DMA_MBURST_SINGLE;
+
+    ((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->CR =
+        (((DMA_Stream_TypeDef *) fir_lepton_spi_rx_dma.Instance)->CR & ~DMA_SxCR_PBURST_Msk) |
+        DMA_PBURST_SINGLE;
 
     fb_alloc_mark_permanent();
     fir_lepton_spi_resync();
@@ -508,11 +528,38 @@ mp_obj_t fir_lepton_get_radiometry()
     return mp_obj_new_bool(fir_lepton_rad_en);
 }
 
-static const uint16_t *fir_lepton_get_frame()
+void fir_lepton_register_frame_cb(mp_obj_t cb)
 {
-    int sampled_framebuffer_head = framebuffer_head;
-    framebuffer_tail = sampled_framebuffer_head;
-    return framebuffers[sampled_framebuffer_head];
+    fir_lepton_frame_cb = cb;
+}
+
+mp_obj_t fir_lepton_get_frame_available()
+{
+    return mp_obj_new_bool(framebuffer_tail != framebuffer_head);
+}
+
+static const uint16_t *fir_lepton_get_frame(int timeout)
+{
+    int sampled_framebuffer_tail = framebuffer_tail;
+
+    if (timeout >= 0) {
+        for (uint32_t start = systick_current_millis();;) {
+            sampled_framebuffer_tail = framebuffer_tail;
+
+            if (framebuffer_head != sampled_framebuffer_tail) {
+                break;
+            }
+
+            if ((systick_current_millis() - start) >= timeout) {
+                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("Timeout!"));
+            }
+
+            __WFI();
+        }
+    }
+
+    framebuffer_head = sampled_framebuffer_tail;
+    return framebuffers[sampled_framebuffer_tail];
 }
 
 static int fir_lepton_get_temperature()
@@ -531,11 +578,11 @@ mp_obj_t fir_lepton_read_ta()
     return mp_obj_new_float((fir_lepton_get_temperature() * 0.01f) - 273.15f);
 }
 
-mp_obj_t fir_lepton_read_ir(int w, int h, bool mirror, bool flip, bool transpose)
+mp_obj_t fir_lepton_read_ir(int w, int h, bool mirror, bool flip, bool transpose, int timeout)
 {
     int kelvin = fir_lepton_get_temperature();
     mp_obj_list_t *list = (mp_obj_list_t *) mp_obj_new_list(w * h, NULL);
-    const uint16_t *data = fir_lepton_get_frame();
+    const uint16_t *data = fir_lepton_get_frame(timeout);
     float min = +FLT_MAX;
     float max = -FLT_MAX;
     int w_1 = w - 1;
@@ -584,10 +631,10 @@ mp_obj_t fir_lepton_read_ir(int w, int h, bool mirror, bool flip, bool transpose
 }
 
 void fir_lepton_fill_image(image_t *img, int w, int h, bool auto_range, float min, float max,
-                           bool mirror, bool flip, bool transpose)
+                           bool mirror, bool flip, bool transpose, int timeout)
 {
     int kelvin = fir_lepton_get_temperature();
-    const uint16_t *data = fir_lepton_get_frame();
+    const uint16_t *data = fir_lepton_get_frame(timeout);
     int new_min;
     int new_max;
 
@@ -656,34 +703,32 @@ void fir_lepton_fill_image(image_t *img, int w, int h, bool auto_range, float mi
     }
 }
 
-void fir_lepton_trigger_ffc()
+void fir_lepton_trigger_ffc(uint n_args, const mp_obj_t *args, mp_map_t *kw_args)
 {
     if (LEP_RunSysFFCNormalization(&fir_lepton_handle) != LEP_OK) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("FFC Error!"));
     }
-}
 
-void fir_lepton_wait_on_ffc(uint n_args, const mp_obj_t *args)
-{
-    uint32_t start = systick_current_millis();
-    uint32_t delay_ms = (n_args < 1) ? 5000 : mp_obj_get_int(args[0]);
+    int timeout = py_helper_keyword_int(n_args, args, 0, kw_args, MP_OBJ_NEW_QSTR(MP_QSTR_timeout), -1);
 
-    for (;;) {
-        LEP_SYS_STATUS_E status;
+    if (timeout >= 0) {
+        for (uint32_t start = systick_current_millis();;) {
+            LEP_SYS_STATUS_E status;
 
-        if (LEP_GetSysFFCStatus(&fir_lepton_handle, &status) != LEP_OK) {
-            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("SYS Error!"));
+            if (LEP_GetSysFFCStatus(&fir_lepton_handle, &status) != LEP_OK) {
+                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("SYS Error!"));
+            }
+
+            if (status == LEP_SYS_STATUS_READY) {
+                break;
+            }
+
+            if ((systick_current_millis() - start) >= timeout) {
+                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("Timeout!"));
+            }
+
+            systick_sleep(1);
         }
-
-        if (status == LEP_SYS_STATUS_READY) {
-            break;
-        }
-
-        if ((systick_current_millis() - start) >= delay_ms) {
-            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("Timeout!"));
-        }
-
-        systick_sleep(1);
     }
 }
 

@@ -81,6 +81,8 @@
 #include "py_audio.h"
 #include "framebuffer.h"
 #include "omv_boardconfig.h"
+#include "cambus.h"
+#include "sensor.h"
 
 uint32_t HAL_GetHalVersion()
 {
@@ -151,7 +153,12 @@ soft_reset:
     uart_init0();
     #endif
 
+    fb_alloc_init0();
     framebuffer_init0();
+
+    #if MICROPY_PY_SENSOR
+    sensor_init();
+    #endif
 
     #if (MICROPY_PY_BLE_NUS == 0) && (MICROPY_HW_USB_CDC == 0)
     {
@@ -159,7 +166,7 @@ soft_reset:
             MP_OBJ_NEW_SMALL_INT(0),
             MP_OBJ_NEW_SMALL_INT(115200),
         };
-        MP_STATE_PORT(board_stdio_uart) = 
+        MP_STATE_PORT(board_stdio_uart) =
             machine_hard_uart_type.make_new((mp_obj_t)&machine_hard_uart_type, MP_ARRAY_SIZE(args), 0, args);
     }
     #endif
@@ -278,6 +285,8 @@ soft_reset:
             mp_obj_print_exception(&mp_plat_print, (mp_obj_t)nlr.ret_val);
         }
     }
+
+    usbdbg_wait_for_command(1000);
 
     usbdbg_set_irq_enabled(false);
 

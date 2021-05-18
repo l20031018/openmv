@@ -1,5 +1,69 @@
 # Change Log
-## [3.9.0](https://github.com/openmv/openmv/releases/tag/v3.9.0) (2020-01-13)
+## [4.0.0](https://github.com/openmv/openmv/releases/tag/v4.0.0) (2021-05-13)
+* Update to MicroPython 1.15
+* Update to GNU ARM Toolchain 10-2020-q4-major.
+* Update all examples and unit-tests.
+* Improved and more stable WiFi debugging.
+* Add support for double, triple and n buffers capture.
+* Add support for using MDMA to offload line processing.
+* Add support for non-blocking image capture in sensor.snapshot.
+* Add support for copying JPEG images.
+* Add support for CYW Bluetooth for Portenta board.
+* Add initial MT9M114 driver.
+* Add debayering support to draw_image.
+* Fix HM01B0 transposed image bug.
+* Fix HM01B0 vflip/hmirror settings.
+* Fix NANO33 PID/VID.
+* Fix UART clock source for H7 MCUs.
+* Fix FLIR Lepton init reliably on Pure Thermal board.
+
+## [3.9.4](https://github.com/openmv/openmv/releases/tag/v3.9.4) (2021-03-26)
+* Add new buzzer Python module.
+* Add Ethernet low-power mode functions.
+* Add ULPI/Phy low-power mode functions.
+* Add initial OV767x sensor driver.
+* Optimized DMA buffers allocation to reduce bus contention.
+* Update MT9V034 manual AEC/AEG, manual gain/exposure and implement readout control.
+* Update HM01B0 driver, add support for motion detection, manual exposure and 320x320 mode.
+* Optimize software and hardware JPEG compression.
+* Improve FLIR module DMA bandwidth usage.
+* Optimize TV driver DMA bandwidth usage.
+* Fix Portenta low-power modes (stop and standby modes).
+* Fix OV5640 autofocus logic.
+* Fix linker script stack alignment for boards with SRAM stack.
+* Fix Portenta MPU regions to default state on reset.
+* Update RTSP server and examples to work with FFPLAY.
+* Update Portenta examples, add Himax low-power/motion detection example.
+
+## [3.9.3](https://github.com/openmv/openmv/releases/tag/v3.9.3) (2021-02-13)
+* Fix issues with Portenta WiFi.
+* Fix JPEG Binary image compression.
+* Fix rgb_channel_extraction grayscale selection for TV.
+* Fix FLIR FFC with a timeout.
+* Add initial support for Bormio.
+* Add Portenta WiFi examples.
+* Update LWIP.
+
+## [3.9.2](https://github.com/openmv/openmv/releases/tag/v3.9.2) (2021-02-01)
+* Fix ImageIO RGB565 bug.
+* Update Portenta LoRa library.
+* Fix IDMA/DMA2 bus contention bug on newer cams.
+* Fix external Lepton driver on F4 and F7.
+* Fix issues with F7 LCD triple buffering.
+* Improve STOP mode power consumption.
+* Improve TV driver resolution, add scaling, and triple buffering
+
+## [3.9.1](https://github.com/openmv/openmv/releases/tag/v3.9.1) (2021-01-22)
+* Update ulab to 2.1.3
+* Add Portenta LoRa library.
+* Add set_framerate to sensor module.
+* Enable exFAT for Portenta.
+* Update HM01B0 sensor driver.
+* Improve low-power modes on QSPI boards.
+* Reduced firmware image size.
+* Faster firmware build.
+
+## [3.9.0](https://github.com/openmv/openmv/releases/tag/v3.9.0) (2021-01-13)
 * Fix H7 timer bug in new HAL. 
 * Fix pyb_spi bug from upstream.
 * Fix OV5640 PCLK calculation.

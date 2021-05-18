@@ -1,5 +1,5 @@
 /* This file is part of the OpenMV project.
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io> & Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io> & Kwabena W. Agyeman <kwagyeman@openmv.io>
  * This work is licensed under the MIT license, see the file LICENSE for details.
  */
 
@@ -9,15 +9,15 @@
 #include "py/objlist.h"
 #include "py/objtuple.h"
 
+#include "imlib_config.h"
 #include "py_helper.h"
+#ifdef IMLIB_ENABLE_TF
 #include "py_assert.h"
 #include "py_image.h"
 #include "ff_wrapper.h"
 #include "libtf.h"
 #include "libtf_person_detect_model_data.h"
 #include "py_tf.h"
-
-#ifdef IMLIB_ENABLE_TF
 
 #define PY_TF_PUTCHAR_BUFFER_LEN 1023
 

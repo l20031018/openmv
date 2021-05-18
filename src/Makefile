@@ -46,6 +46,7 @@ BUILD=$(TOP_DIR)/build
 FW_DIR=$(BUILD)/bin
 OMV_DIR=omv
 UVC_DIR=uvc
+CM4_DIR=cm4
 BOOTLDR_DIR=bootloader
 CUBEAI_DIR=stm32cubeai
 CMSIS_DIR=hal/cmsis
@@ -62,16 +63,14 @@ OMV_BOARD_CONFIG_DIR=$(TOP_DIR)/$(OMV_DIR)/boards/$(TARGET)/
 MP_BOARD_CONFIG_DIR=$(TOP_DIR)/$(MICROPY_DIR)/ports/$(PORT)/boards/$(TARGET)/
 MPY_LIB_DIR=$(TOP_DIR)/../scripts/libraries
 FROZEN_MANIFEST=$(OMV_BOARD_CONFIG_DIR)/manifest.py
-
-# Additional qstr definitions for OpenMV
-OMV_QSTR_DEFS = $(TOP_DIR)/$(OMV_DIR)/modules/qstrdefsomv.h
+OMV_COMMON_DIR=$(TOP_DIR)/$(OMV_DIR)/common
 
 # Debugging/Optimization
 ifeq ($(DEBUG), 1)
 CFLAGS += -Og -ggdb3 -Wno-maybe-uninitialized
 else
 DEBUG=0
-CFLAGS += -O2 -ggdb3 -DNDEBUG
+CFLAGS += -O2 -DNDEBUG
 endif
 
 # Enable debug printf
@@ -95,8 +94,12 @@ include $(OMV_BOARD_CONFIG_DIR)/omv_boardconfig.mk
 # Include MicroPython board config.
 #include $(MP_BOARD_CONFIG_DIR)/mpconfigboard.mk
 
+# Additional qstr definitions for OpenMV
+OMV_SRC_QSTR := $(wildcard $(TOP_DIR)/$(OMV_DIR)/modules/*.c)
+OMV_SRC_QSTR += $(wildcard $(TOP_DIR)/$(OMV_DIR)/ports/$(PORT)/modules/*.c)
+
 # The following command line args are passed to MicroPython's top Makefile.
-MICROPY_ARGS = BOARD=$(TARGET) DEBUG=$(DEBUG) QSTR_DEFS="$(OMV_QSTR_DEFS)" MPY_LIB_DIR=$(MPY_LIB_DIR)
+MICROPY_ARGS = BOARD=$(TARGET) DEBUG=$(DEBUG) OMV_SRC_QSTR="$(OMV_SRC_QSTR)" MPY_LIB_DIR=$(MPY_LIB_DIR)
 
 # Configure additional built-in modules. Note must define both the CFLAGS and the Make command line args.
 ifeq ($(MICROPY_PY_SENSOR), 1)
@@ -116,6 +119,7 @@ endif
 
 ifeq ($(MICROPY_PY_ULAB), 1)
 MPY_CFLAGS += -DMICROPY_PY_ULAB=1
+MPY_CFLAGS += -DULAB_CONFIG_FILE="\"$(OMV_BOARD_CONFIG_DIR)/ulab_config.h\""
 MICROPY_ARGS += MICROPY_PY_ULAB=1
 endif
 
@@ -129,6 +133,16 @@ MPY_CFLAGS += -DMICROPY_PY_NETWORK_CYW43=1
 MICROPY_ARGS += MICROPY_PY_NETWORK_CYW43=1
 endif
 
+ifeq ($(MICROPY_PY_BLUETOOTH), 1)
+MPY_CFLAGS += -DMICROPY_PY_BLUETOOTH=1
+MICROPY_ARGS += MICROPY_PY_BLUETOOTH=1
+endif
+
+ifeq ($(MICROPY_BLUETOOTH_NIMBLE), 1)
+MPY_CFLAGS += -DMICROPY_BLUETOOTH_NIMBLE=1
+MICROPY_ARGS += MICROPY_BLUETOOTH_NIMBLE=1
+endif
+
 ifeq ($(MICROPY_PY_AUDIO), 1)
 MPY_CFLAGS += -DMICROPY_PY_AUDIO=1
 MICROPY_ARGS += MICROPY_PY_AUDIO=1
@@ -137,6 +151,21 @@ endif
 ifeq ($(MICROPY_PY_MICRO_SPEECH), 1)
 MPY_CFLAGS += -DMICROPY_PY_MICRO_SPEECH=1
 MICROPY_ARGS += MICROPY_PY_MICRO_SPEECH=1
+endif
+
+ifeq ($(MICROPY_PY_LCD), 1)
+MPY_CFLAGS += -DMICROPY_PY_LCD=1
+MICROPY_ARGS += MICROPY_PY_LCD=1
+endif
+
+ifeq ($(MICROPY_PY_TV), 1)
+MPY_CFLAGS += -DMICROPY_PY_TV=1
+MICROPY_ARGS += MICROPY_PY_TV=1
+endif
+
+ifeq ($(MICROPY_PY_BUZZER), 1)
+MPY_CFLAGS += -DMICROPY_PY_BUZZER=1
+MICROPY_ARGS += MICROPY_PY_BUZZER=1
 endif
 
 # Include the port Makefile.

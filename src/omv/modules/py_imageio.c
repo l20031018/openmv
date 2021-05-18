@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -45,6 +45,7 @@ typedef struct _py_imageio_obj {
             FIL fp;
             uint32_t ms;
             uint32_t mode;
+            int version;
         };
         #endif
         struct {
@@ -56,7 +57,7 @@ typedef struct _py_imageio_obj {
             uint32_t offset;
             uint8_t *buffer;
         };
-    }; 
+    };
     image_io_stream_type_t type;
 } py_imageio_obj_t;
 
@@ -154,10 +155,6 @@ mp_obj_t py_imageio_read(uint n_args, const mp_obj_t *args, mp_map_t *kw_args)
         }
     }
 
-    if (copy_to_fb) {
-        fb_update_jpeg_buffer();
-    }
-
     if (0) {
     #if defined(IMLIB_ENABLE_IMAGE_FILE_IO)
     } else if (stream->type == IMAGE_IO_FILE_STREAM) {
@@ -179,7 +176,7 @@ mp_obj_t py_imageio_read(uint n_args, const mp_obj_t *args, mp_map_t *kw_args)
         uint32_t ms = 0, ms_tmp;
         read_long(fp, &ms_tmp);
 
-        if (!py_helper_keyword_int(n_args, args, 3, kw_args, MP_OBJ_NEW_QSTR(MP_QSTR_pause), true)) {
+        if (py_helper_keyword_int(n_args, args, 3, kw_args, MP_OBJ_NEW_QSTR(MP_QSTR_pause), true)) {
             for (ms = mp_hal_ticks_ms();
                     ((ms - stream->ms) < ms_tmp);
                     ms = mp_hal_ticks_ms()) {
@@ -203,10 +200,26 @@ mp_obj_t py_imageio_read(uint n_args, const mp_obj_t *args, mp_map_t *kw_args)
 
         char ignore[15];
         read_data(fp, image.data, size);
+
+        // Check if original byte reversed data.
+        if ((image.bpp == IMAGE_BPP_RGB565) && (stream->version == 10)) {
+            uint32_t *data_ptr = (uint32_t *) image.data;
+            size_t data_len = image.w * image.h;
+
+            for (; data_len >= 2; data_len -= 2, data_ptr += 1) {
+                *data_ptr = __REV16(*data_ptr); // long aligned
+            }
+
+            if (data_len) {
+                *((uint16_t *) data_ptr) = __REV16(*((uint16_t *) data_ptr)); // word aligned
+            }
+        }
+
         if (size % 16) {
             // Read in to multiple of 16 bytes.
             read_data(fp, ignore, 16 - (size % 16));
         }
+
         py_helper_update_framebuffer(&image);
 
         if (arg_other) {
@@ -236,6 +249,10 @@ mp_obj_t py_imageio_read(uint n_args, const mp_obj_t *args, mp_map_t *kw_args)
         stream->offset += 1;
     } else {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("Invalid image stream"));
+    }
+
+    if (copy_to_fb) {
+        framebuffer_update_jpeg_buffer();
     }
 
     return py_image_from_struct(&image);
@@ -301,17 +318,26 @@ mp_obj_t py_imageio_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
         stream->type = IMAGE_IO_FILE_STREAM;
         stream->mode = mp_obj_str_get_str(args[1])[0];
         if (stream->mode == IMAGE_IO_FILE_READ) {
+            uint8_t version_hi, version_lo;
             file_read_open(&stream->fp, mp_obj_str_get_str(args[0]));
             read_long_expect(&stream->fp, *((uint32_t *) "OMV ")); // OpenMV
             read_long_expect(&stream->fp, *((uint32_t *) "IMG ")); // Image
             read_long_expect(&stream->fp, *((uint32_t *) "STR ")); // Stream
-            read_long_expect(&stream->fp, *((uint32_t *) "V1.0")); // v1.0
+            read_byte_expect(&stream->fp, 'V');
+            read_byte(&stream->fp, &version_hi);
+            read_byte_expect(&stream->fp, '.');
+            read_byte(&stream->fp, &version_lo);
+            if ((version_hi != '1') || ((version_lo != '0') && (version_lo != '1'))) {
+                mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Expected version V1.0 or V1.1"));
+            }
+            stream->version = ((version_hi - '0') * 10) + (version_lo - '0');
         } else if (stream->mode == IMAGE_IO_FILE_WRITE) {
             file_write_open(&stream->fp, mp_obj_str_get_str(args[0]));
             write_long(&stream->fp, *((uint32_t *) "OMV ")); // OpenMV
             write_long(&stream->fp, *((uint32_t *) "IMG ")); // Image
             write_long(&stream->fp, *((uint32_t *) "STR ")); // Stream
-            write_long(&stream->fp, *((uint32_t *) "V1.0")); // v1.0
+            write_long(&stream->fp, *((uint32_t *) "V1.1")); // v1.1
+            stream->version = 11;
         } else {
             mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid stream mode, expected 'r' or 'w'"));
         }

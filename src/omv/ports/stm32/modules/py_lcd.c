@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -22,9 +22,11 @@
 #include "omv_boardconfig.h"
 #include STM32_HAL_H
 
+#if MICROPY_PY_LCD
+
 #define FRAMEBUFFER_COUNT 3
-static int framebuffer_head = 0;
-static volatile int framebuffer_tail = 0;
+static int framebuffer_tail = 0;
+static volatile int framebuffer_head = 0;
 static uint16_t *framebuffers[FRAMEBUFFER_COUNT] = {};
 
 static int lcd_width = 0;
@@ -67,7 +69,7 @@ static int lcd_refresh = 0;
 static int lcd_intensity = 0;
 
 #ifdef OMV_SPI_LCD_CONTROLLER
-DMA_HandleTypeDef spi_tx_dma = {};
+static DMA_HandleTypeDef spi_tx_dma = {};
 
 static volatile enum {
     SPI_TX_CB_IDLE,
@@ -99,7 +101,7 @@ static void spi_config_deinit()
     ///////////////////////////////////////////////////////////////////////
 }
 
-void spi_lcd_callback(SPI_HandleTypeDef *hspi);
+static void spi_lcd_callback(SPI_HandleTypeDef *hspi);
 
 static void spi_config_init(int w, int h, int refresh_rate, bool triple_buffer, bool bgr)
 {
@@ -178,27 +180,63 @@ static void spi_config_init(int w, int h, int refresh_rate, bool triple_buffer, 
     if (triple_buffer) {
         fb_alloc_mark();
 
-        framebuffer_head = 0;
         framebuffer_tail = 0;
+        framebuffer_head = 0;
 
         for (int i = 0; i < FRAMEBUFFER_COUNT; i++) {
-            framebuffers[i] = (uint16_t *) fb_alloc0(w * h * sizeof(uint16_t), FB_ALLOC_NO_HINT);
+            framebuffers[i] = (uint16_t *) fb_alloc0(w * h * sizeof(uint16_t), FB_ALLOC_CACHE_ALIGN);
         }
 
         dma_init(&spi_tx_dma, OMV_SPI_LCD_CONTROLLER->tx_dma_descr, DMA_MEMORY_TO_PERIPH, OMV_SPI_LCD_CONTROLLER->spi);
         OMV_SPI_LCD_CONTROLLER->spi->hdmatx = &spi_tx_dma;
         OMV_SPI_LCD_CONTROLLER->spi->hdmarx = NULL;
+#if defined(MCU_SERIES_H7)
+        spi_tx_dma.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+#else
         spi_tx_dma.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
-        spi_tx_dma.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
-        ((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR = (((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR & ~DMA_SxCR_PSIZE_Msk) | DMA_PDATAALIGN_HALFWORD;
-        ((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR = (((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR & ~DMA_SxCR_MSIZE_Msk) | DMA_MDATAALIGN_HALFWORD;
+#endif
+        spi_tx_dma.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+        spi_tx_dma.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+        spi_tx_dma.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
+        spi_tx_dma.Init.MemBurst = DMA_MBURST_INC4;
+#if defined(MCU_SERIES_H7)
+        spi_tx_dma.Init.PeriphBurst = DMA_PBURST_INC4;
+#else
+        spi_tx_dma.Init.PeriphBurst = DMA_PBURST_SINGLE;
+#endif
+#if defined(MCU_SERIES_H7)
+        ((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR =
+                (((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR & ~DMA_SxCR_PSIZE_Msk) | DMA_PDATAALIGN_WORD;
+#else
+        ((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR =
+                (((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR & ~DMA_SxCR_PSIZE_Msk) | DMA_PDATAALIGN_HALFWORD;
+#endif
+        ((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR =
+            (((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR & ~DMA_SxCR_MSIZE_Msk) | DMA_MDATAALIGN_WORD;
+        ((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->FCR =
+            (((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->FCR & ~DMA_SxFCR_DMDIS_Msk) | DMA_FIFOMODE_ENABLE;
+        ((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->FCR =
+            (((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->FCR & ~DMA_SxFCR_FTH_Msk) | DMA_FIFO_THRESHOLD_FULL;
+        ((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR =
+            (((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR & ~DMA_SxCR_MBURST_Msk) | DMA_MBURST_INC4;
+#if defined(MCU_SERIES_H7)
+        ((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR =
+            (((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR & ~DMA_SxCR_PBURST_Msk) | DMA_PBURST_INC4;
+#else
+        ((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR =
+            (((DMA_Stream_TypeDef *) spi_tx_dma.Instance)->CR & ~DMA_SxCR_PBURST_Msk) | DMA_PBURST_SINGLE;
+#endif
         fb_alloc_mark_permanent();
     }
 }
 
 static bool spi_tx_cb_state_on[FRAMEBUFFER_COUNT] = {};
 
-void spi_lcd_callback(SPI_HandleTypeDef *hspi)
+static const uint8_t display_off[] = {0x28};
+static const uint8_t display_on[] = {0x29};
+static const uint8_t memory_write[] = {0x2C};
+
+static void spi_lcd_callback(SPI_HandleTypeDef *hspi)
 {
     if (lcd_type == LCD_SHIELD) {
         static uint16_t *spi_tx_cb_state_memory_write_addr = NULL;
@@ -207,74 +245,84 @@ void spi_lcd_callback(SPI_HandleTypeDef *hspi)
 
         switch (spi_tx_cb_state) {
             case SPI_TX_CB_MEMORY_WRITE_CMD: {
-                if (!spi_tx_cb_state_on[framebuffer_head]) {
-                    spi_tx_cb_state = SPI_TX_CB_DISPLAY_OFF;
-                    framebuffer_tail = framebuffer_head;
+                if (!spi_tx_cb_state_on[framebuffer_tail]) {
                     OMV_SPI_LCD_CS_HIGH();
                     OMV_SPI_LCD_RS_ON();
+                    spi_tx_cb_state = SPI_TX_CB_DISPLAY_OFF;
+                    framebuffer_head = framebuffer_tail;
                     OMV_SPI_LCD_CS_LOW();
-                    HAL_SPI_Transmit_IT(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t []) {0x28}, 1); // display off
+                    HAL_SPI_Transmit_IT(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t *) display_off, sizeof(display_off));
                 } else {
+                    OMV_SPI_LCD_CS_HIGH();
+                    OMV_SPI_LCD_RS_ON();
                     spi_tx_cb_state = SPI_TX_CB_MEMORY_WRITE;
-                    spi_tx_cb_state_memory_write_addr = framebuffers[framebuffer_head];
+                    spi_tx_cb_state_memory_write_addr = framebuffers[framebuffer_tail];
                     spi_tx_cb_state_memory_write_count = lcd_width * lcd_height;
                     spi_tx_cb_state_memory_write_first = true;
-                    framebuffer_tail = framebuffer_head;
-                    OMV_SPI_LCD_CS_HIGH();
-                    OMV_SPI_LCD_RS_ON();
+                    framebuffer_head = framebuffer_tail;
                     OMV_SPI_LCD_CS_LOW();
                     // When starting the interrupt chain the first HAL_SPI_Transmit_IT is not executed
                     // in interrupt context. So, disable interrupts for the first HAL_SPI_Transmit_IT so
                     // that it completes first and unlocks the SPI bus before allowing the interrupt
                     // it causes to trigger starting the interrupt chain.
                     uint32_t irq_state = disable_irq();
-                    HAL_SPI_Transmit_IT(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t []) {0x2C}, 1); // memory write
+                    HAL_SPI_Transmit_IT(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t *) memory_write, sizeof(memory_write));
                     enable_irq(irq_state);
                 }
                 break;
             }
             case SPI_TX_CB_MEMORY_WRITE: {
                 uint16_t *addr = spi_tx_cb_state_memory_write_addr;
-                size_t count = IM_MIN(spi_tx_cb_state_memory_write_count, 65535);
-                spi_tx_cb_state = (spi_tx_cb_state_memory_write_count > 65535) ? SPI_TX_CB_MEMORY_WRITE : SPI_TX_CB_DISPLAY_ON;
+                size_t count = IM_MIN(spi_tx_cb_state_memory_write_count, (65536-8));
+                spi_tx_cb_state = (spi_tx_cb_state_memory_write_count > (65536-8)) ? SPI_TX_CB_MEMORY_WRITE : SPI_TX_CB_DISPLAY_ON;
                 spi_tx_cb_state_memory_write_addr += count;
                 spi_tx_cb_state_memory_write_count -= count;
                 if (spi_tx_cb_state_memory_write_first) {
-                    spi_tx_cb_state_memory_write_first = false;
                     OMV_SPI_LCD_CS_HIGH();
                     OMV_SPI_LCD_RS_OFF();
-                    OMV_SPI_LCD_CS_LOW();
+                    spi_tx_cb_state_memory_write_first = false;
                     OMV_SPI_LCD_CONTROLLER->spi->Init.DataSize = SPI_DATASIZE_16BIT;
 #if defined(MCU_SERIES_H7)
-                    OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 = (OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 & ~SPI_CFG1_DSIZE_Msk) | SPI_DATASIZE_16BIT;
+                    OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 =
+                        (OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 & ~SPI_CFG1_DSIZE_Msk) | SPI_DATASIZE_16BIT;
+                    OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 =
+                        (OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 & ~SPI_CFG1_FTHLV_Msk) | SPI_FIFO_THRESHOLD_08DATA;
 #elif defined(MCU_SERIES_F7)
-                    OMV_SPI_LCD_CONTROLLER->spi->Instance->CR2 = (OMV_SPI_LCD_CONTROLLER->spi->Instance->CR2 & ~SPI_CR2_DS_Msk) | SPI_DATASIZE_16BIT;
+                    OMV_SPI_LCD_CONTROLLER->spi->Instance->CR2 =
+                        (OMV_SPI_LCD_CONTROLLER->spi->Instance->CR2 & ~SPI_CR2_DS_Msk) | SPI_DATASIZE_16BIT;
 #elif defined(MCU_SERIES_F4)
-                    OMV_SPI_LCD_CONTROLLER->spi->Instance->CR1 = (OMV_SPI_LCD_CONTROLLER->spi->Instance->CR1 & ~SPI_CR1_DFF_Msk) | SPI_DATASIZE_16BIT;
+                    OMV_SPI_LCD_CONTROLLER->spi->Instance->CR1 =
+                        (OMV_SPI_LCD_CONTROLLER->spi->Instance->CR1 & ~SPI_CR1_DFF_Msk) | SPI_DATASIZE_16BIT;
 #endif
+                    OMV_SPI_LCD_CS_LOW();
                 }
                 HAL_SPI_Transmit_DMA(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t *) addr, count);
                 break;
             }
             case SPI_TX_CB_DISPLAY_ON: {
+                OMV_SPI_LCD_CS_HIGH();
+                OMV_SPI_LCD_RS_ON();
                 spi_tx_cb_state = SPI_TX_CB_MEMORY_WRITE_CMD;
                 OMV_SPI_LCD_CONTROLLER->spi->Init.DataSize = SPI_DATASIZE_8BIT;
 #if defined(MCU_SERIES_H7)
-                OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 = (OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 & ~SPI_CFG1_DSIZE_Msk) | SPI_DATASIZE_8BIT;
+                OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 =
+                    (OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 & ~SPI_CFG1_DSIZE_Msk) | SPI_DATASIZE_8BIT;
+                OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 =
+                    (OMV_SPI_LCD_CONTROLLER->spi->Instance->CFG1 & ~SPI_CFG1_FTHLV_Msk) | SPI_FIFO_THRESHOLD_01DATA;
 #elif defined(MCU_SERIES_F7)
-                OMV_SPI_LCD_CONTROLLER->spi->Instance->CR2 = (OMV_SPI_LCD_CONTROLLER->spi->Instance->CR2 & ~SPI_CR2_DS_Msk) | SPI_DATASIZE_8BIT;
+                OMV_SPI_LCD_CONTROLLER->spi->Instance->CR2 =
+                    (OMV_SPI_LCD_CONTROLLER->spi->Instance->CR2 & ~SPI_CR2_DS_Msk) | SPI_DATASIZE_8BIT;
 #elif defined(MCU_SERIES_F4)
-                OMV_SPI_LCD_CONTROLLER->spi->Instance->CR1 = (OMV_SPI_LCD_CONTROLLER->spi->Instance->CR1 & ~SPI_CR1_DFF_Msk) | SPI_DATASIZE_8BIT;
+                OMV_SPI_LCD_CONTROLLER->spi->Instance->CR1 =
+                    (OMV_SPI_LCD_CONTROLLER->spi->Instance->CR1 & ~SPI_CR1_DFF_Msk) | SPI_DATASIZE_8BIT;
 #endif
-                OMV_SPI_LCD_CS_HIGH();
-                OMV_SPI_LCD_RS_ON();
                 OMV_SPI_LCD_CS_LOW();
-                HAL_SPI_Transmit_IT(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t []) {0x29}, 1); // display on
+                HAL_SPI_Transmit_IT(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t *) display_on, sizeof(display_on));
                 break;
             }
             case SPI_TX_CB_DISPLAY_OFF: {
-                spi_tx_cb_state = SPI_TX_CB_IDLE;
                 OMV_SPI_LCD_CS_HIGH();
+                spi_tx_cb_state = SPI_TX_CB_IDLE;
                 break;
             }
             default: {
@@ -323,7 +371,7 @@ static void spi_lcd_display(image_t *src_img, int dst_x_start, int dst_y_start, 
 
         OMV_SPI_LCD_RS_ON();
         OMV_SPI_LCD_CS_LOW();
-        HAL_SPI_Transmit(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t []) {0x2C}, 1, HAL_MAX_DELAY); // memory write
+        HAL_SPI_Transmit(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t *) memory_write, sizeof(memory_write), HAL_MAX_DELAY); // memory write
         OMV_SPI_LCD_CS_HIGH();
         OMV_SPI_LCD_RS_OFF();
 
@@ -364,17 +412,17 @@ static void spi_lcd_display(image_t *src_img, int dst_x_start, int dst_y_start, 
 
         OMV_SPI_LCD_RS_ON();
         OMV_SPI_LCD_CS_LOW();
-        HAL_SPI_Transmit(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t []) {0x29}, 1, HAL_MAX_DELAY); // display on
+        HAL_SPI_Transmit(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t *) display_on, sizeof(display_on), HAL_MAX_DELAY);
         OMV_SPI_LCD_CS_HIGH();
         OMV_SPI_LCD_RS_OFF();
 
         fb_free();
     } else {
-        // For triple buffering we are never drawing where head or tail (which may instantly update to
-        // to be equal to head) is.
-        int new_framebuffer_head = (framebuffer_head + 1) % FRAMEBUFFER_COUNT;
-        if (new_framebuffer_head == framebuffer_tail) new_framebuffer_head = (new_framebuffer_head + 1) % FRAMEBUFFER_COUNT;
-        dst_img.data = (uint8_t *) framebuffers[new_framebuffer_head];
+        // For triple buffering we are never drawing where tail or head (which may instantly update to
+        // to be equal to tail) is.
+        int new_framebuffer_tail = (framebuffer_tail + 1) % FRAMEBUFFER_COUNT;
+        if (new_framebuffer_tail == framebuffer_head) new_framebuffer_tail = (new_framebuffer_tail + 1) % FRAMEBUFFER_COUNT;
+        dst_img.data = (uint8_t *) framebuffers[new_framebuffer_tail];
 
         if (black) { // zero the whole image
             memset(dst_img.data, 0, lcd_width * lcd_height * sizeof(uint16_t));
@@ -398,15 +446,15 @@ static void spi_lcd_display(image_t *src_img, int dst_x_start, int dst_y_start, 
         }
 
         // Tell the call back FSM that we want to turn the display on.
-        spi_tx_cb_state_on[new_framebuffer_head] = true;
+        spi_tx_cb_state_on[new_framebuffer_tail] = true;
 
         #ifdef __DCACHE_PRESENT
         // Flush data for DMA
         SCB_CleanDCache();
         #endif
 
-        // Update head which means a new image is ready.
-        framebuffer_head = new_framebuffer_head;
+        // Update tail which means a new image is ready.
+        framebuffer_tail = new_framebuffer_tail;
 
         // Kick off an update of the display.
         spi_lcd_kick();
@@ -418,20 +466,20 @@ static void spi_lcd_clear()
     if (!lcd_triple_buffer) {
         OMV_SPI_LCD_RS_ON();
         OMV_SPI_LCD_CS_LOW();
-        HAL_SPI_Transmit(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t []) {0x28}, 1, HAL_MAX_DELAY); // display off
+        HAL_SPI_Transmit(OMV_SPI_LCD_CONTROLLER->spi, (uint8_t *) display_off, sizeof(display_off), HAL_MAX_DELAY);
         OMV_SPI_LCD_CS_HIGH();
         OMV_SPI_LCD_RS_OFF();
     } else {
-        // For triple buffering we are never drawing where head or tail (which may instantly update to
-        // to be equal to head) is.
-        int new_framebuffer_head = (framebuffer_head + 1) % FRAMEBUFFER_COUNT;
-        if (new_framebuffer_head == framebuffer_tail) new_framebuffer_head = (new_framebuffer_head + 1) % FRAMEBUFFER_COUNT;
+        // For triple buffering we are never drawing where tail or head (which may instantly update to
+        // to be equal to tail) is.
+        int new_framebuffer_tail = (framebuffer_tail + 1) % FRAMEBUFFER_COUNT;
+        if (new_framebuffer_tail == framebuffer_head) new_framebuffer_tail = (new_framebuffer_tail + 1) % FRAMEBUFFER_COUNT;
 
         // Tell the call back FSM that we want to turn the display off.
-        spi_tx_cb_state_on[new_framebuffer_head] = false;
+        spi_tx_cb_state_on[new_framebuffer_tail] = false;
 
-        // Update head which means a new image is ready.
-        framebuffer_head = new_framebuffer_head;
+        // Update tail which means a new image is ready.
+        framebuffer_tail = new_framebuffer_tail;
 
         // Kick off an update of the display.
         spi_lcd_kick();
@@ -544,7 +592,7 @@ static const uint16_t resolution_w_h[][2] = {
 
 static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
     { // QVGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -559,7 +607,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // TQVGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -574,7 +622,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // FHVGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -589,7 +637,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // FHVGA2
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -604,7 +652,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // VGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -619,7 +667,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // THVGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -634,7 +682,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // FWVGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -649,7 +697,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // FWVGA2
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -664,7 +712,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // TFWVGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -679,7 +727,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // TFWVGA2
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -694,7 +742,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // SVGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -709,7 +757,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // WSVGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -724,7 +772,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // XGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -739,7 +787,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // SXGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -754,7 +802,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // SXGA2
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -769,7 +817,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // UXGA
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -784,7 +832,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // HD
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -799,7 +847,7 @@ static const LTDC_InitTypeDef resolution_cfg[] = { // CVT-RB ver 2
         .Backcolor = {.Blue=0, .Green=0, .Red=0}
     },
     { // FHD
-        .HSPolarity = LTDC_HSPOLARITY_AL,
+        .HSPolarity = LTDC_HSPOLARITY_AH,
         .VSPolarity = LTDC_VSPOLARITY_AL,
         .DEPolarity = LTDC_DEPOLARITY_AL,
         .PCPolarity = LTDC_PCPOLARITY_IPC,
@@ -848,7 +896,7 @@ static void ltdc_pll_config_init(int frame_size, int refresh_rate)
             uint32_t pll_clk = pixel_clock * divr;
 
             uint32_t vco = 0;
-            if (150000 <= pll_clk && pll_clk <= 42000) vco = RCC_PLL3VCOMEDIUM;
+            if (150000 <= pll_clk && pll_clk <= 420000) vco = RCC_PLL3VCOMEDIUM;
             else if (192000 <= pll_clk && pll_clk <= 836000) vco = RCC_PLL3VCOWIDE;
             else continue;
 
@@ -889,11 +937,11 @@ static void ltdc_config_init(int frame_size, int refresh_rate)
 
     fb_alloc_mark();
 
-    framebuffer_head = 0;
     framebuffer_tail = 0;
+    framebuffer_head = 0;
 
     for (int i = 0; i < FRAMEBUFFER_COUNT; i++) {
-        framebuffers[i] = (uint16_t *) fb_alloc0(w * h * sizeof(uint16_t), FB_ALLOC_NO_HINT);
+        framebuffers[i] = (uint16_t *) fb_alloc0(w * h * sizeof(uint16_t), FB_ALLOC_CACHE_ALIGN);
         ltdc_framebuffer_layers[i].WindowX0 = 0;
         ltdc_framebuffer_layers[i].WindowX1 = w;
         ltdc_framebuffer_layers[i].WindowY0 = 0;
@@ -936,13 +984,13 @@ void LTDC_IRQHandler()
 
 void HAL_LTDC_LineEventCallback(LTDC_HandleTypeDef *hltdc)
 {
-    HAL_LTDC_ConfigLayer_NoReload(&ltdc_handle, &ltdc_framebuffer_layers[framebuffer_head], LTDC_LAYER_1);
+    HAL_LTDC_ConfigLayer_NoReload(&ltdc_handle, &ltdc_framebuffer_layers[framebuffer_tail], LTDC_LAYER_1);
     HAL_LTDC_Reload(&ltdc_handle, LTDC_RELOAD_VERTICAL_BLANKING);
 
     #if defined(OMV_LCD_DISP_PIN)
-    if (((lcd_type == LCD_DISPLAY) || (lcd_type == LCD_DISPLAY_WITH_HDMI)) && (framebuffer_head != framebuffer_tail)) OMV_LCD_DISP_ON(); // Turn display on if there is a new command.
+    if (((lcd_type == LCD_DISPLAY) || (lcd_type == LCD_DISPLAY_WITH_HDMI)) && (framebuffer_tail != framebuffer_head)) OMV_LCD_DISP_ON(); // Turn display on if there is a new command.
     #endif
-    framebuffer_tail = framebuffer_head;
+    framebuffer_head = framebuffer_tail;
 
     // Continue chain...
     HAL_LTDC_ProgramLineEvent(&ltdc_handle, 13); // AccumulatedVBP
@@ -959,21 +1007,21 @@ static void ltdc_display(image_t *src_img, int dst_x_start, int dst_y_start, flo
     int x0, x1, y0, y1;
     bool black = !imlib_draw_image_rectangle(&dst_img, src_img, dst_x_start, dst_y_start, x_scale, y_scale, roi, alpha, alpha_palette, hint, &x0, &x1, &y0, &y1);
 
-    // For triple buffering we are never drawing where head or tail (which may instantly update to
-    // to be equal to head) is.
-    int new_framebuffer_head = (framebuffer_head + 1) % FRAMEBUFFER_COUNT;
-    if (new_framebuffer_head == framebuffer_tail) new_framebuffer_head = (new_framebuffer_head + 1) % FRAMEBUFFER_COUNT;
-    dst_img.data = (uint8_t *) framebuffers[new_framebuffer_head];
+    // For triple buffering we are never drawing where tail or head (which may instantly update to
+    // to be equal to tail) is.
+    int new_framebuffer_tail = (framebuffer_tail + 1) % FRAMEBUFFER_COUNT;
+    if (new_framebuffer_tail == framebuffer_head) new_framebuffer_tail = (new_framebuffer_tail + 1) % FRAMEBUFFER_COUNT;
+    dst_img.data = (uint8_t *) framebuffers[new_framebuffer_tail];
 
     // Set default values for the layer to display the whole framebuffer.
-    ltdc_framebuffer_layers[new_framebuffer_head].WindowX0 = black ? 0 : x0;
-    ltdc_framebuffer_layers[new_framebuffer_head].WindowX1 = black ? lcd_width : x1;
-    ltdc_framebuffer_layers[new_framebuffer_head].WindowY0 = black ? 0 : y0;
-    ltdc_framebuffer_layers[new_framebuffer_head].WindowY1 = black ? lcd_height : y1;
-    ltdc_framebuffer_layers[new_framebuffer_head].Alpha = black ? 0 : fast_roundf((alpha * 255) / 256.f);
-    ltdc_framebuffer_layers[new_framebuffer_head].FBStartAdress = black ? ((uint32_t) dst_img.data) : ((uint32_t)  (IMAGE_COMPUTE_RGB565_PIXEL_ROW_PTR(&dst_img, y0) + x0));
-    ltdc_framebuffer_layers[new_framebuffer_head].ImageWidth = black ? lcd_width : dst_img.w;
-    ltdc_framebuffer_layers[new_framebuffer_head].ImageHeight = black ? lcd_height : (y1 - y0);
+    ltdc_framebuffer_layers[new_framebuffer_tail].WindowX0 = black ? 0 : x0;
+    ltdc_framebuffer_layers[new_framebuffer_tail].WindowX1 = black ? lcd_width : x1;
+    ltdc_framebuffer_layers[new_framebuffer_tail].WindowY0 = black ? 0 : y0;
+    ltdc_framebuffer_layers[new_framebuffer_tail].WindowY1 = black ? lcd_height : y1;
+    ltdc_framebuffer_layers[new_framebuffer_tail].Alpha = black ? 0 : fast_roundf((alpha * 255) / 256.f);
+    ltdc_framebuffer_layers[new_framebuffer_tail].FBStartAdress = black ? ((uint32_t) dst_img.data) : ((uint32_t)  (IMAGE_COMPUTE_RGB565_PIXEL_ROW_PTR(&dst_img, y0) + x0));
+    ltdc_framebuffer_layers[new_framebuffer_tail].ImageWidth = black ? lcd_width : dst_img.w;
+    ltdc_framebuffer_layers[new_framebuffer_tail].ImageHeight = black ? lcd_height : (y1 - y0);
 
     // Set alpha to 256 here as we will use the layer alpha to blend the image into the background color of black for free.
     if (!black) imlib_draw_image(&dst_img, src_img, dst_x_start, dst_y_start, x_scale, y_scale, roi,
@@ -984,29 +1032,29 @@ static void ltdc_display(image_t *src_img, int dst_x_start, int dst_y_start, flo
     if (!black) SCB_CleanDCache();
     #endif
 
-    // Update head which means a new image is ready.
-    framebuffer_head = new_framebuffer_head;
+    // Update tail which means a new image is ready.
+    framebuffer_tail = new_framebuffer_tail;
 }
 
 static void ltdc_clear()
 {
-    // For triple buffering we are never drawing where head or tail (which may instantly update to
-    // to be equal to head) is.
-    int new_framebuffer_head = (framebuffer_head + 1) % FRAMEBUFFER_COUNT;
-    if (new_framebuffer_head == framebuffer_tail) new_framebuffer_head = (new_framebuffer_head + 1) % FRAMEBUFFER_COUNT;
+    // For triple buffering we are never drawing where tail or head (which may instantly update to
+    // to be equal to tail) is.
+    int new_framebuffer_tail = (framebuffer_tail + 1) % FRAMEBUFFER_COUNT;
+    if (new_framebuffer_tail == framebuffer_head) new_framebuffer_tail = (new_framebuffer_tail + 1) % FRAMEBUFFER_COUNT;
 
     // Set default values for the layer to display the whole framebuffer.
-    ltdc_framebuffer_layers[new_framebuffer_head].WindowX0 = 0;
-    ltdc_framebuffer_layers[new_framebuffer_head].WindowX1 = lcd_width;
-    ltdc_framebuffer_layers[new_framebuffer_head].WindowY0 = 0;
-    ltdc_framebuffer_layers[new_framebuffer_head].WindowY1 = lcd_height;
-    ltdc_framebuffer_layers[new_framebuffer_head].Alpha = 0;
-    ltdc_framebuffer_layers[new_framebuffer_head].FBStartAdress = (uint32_t) framebuffers[new_framebuffer_head];
-    ltdc_framebuffer_layers[new_framebuffer_head].ImageWidth = lcd_width;
-    ltdc_framebuffer_layers[new_framebuffer_head].ImageHeight = lcd_height;
+    ltdc_framebuffer_layers[new_framebuffer_tail].WindowX0 = 0;
+    ltdc_framebuffer_layers[new_framebuffer_tail].WindowX1 = lcd_width;
+    ltdc_framebuffer_layers[new_framebuffer_tail].WindowY0 = 0;
+    ltdc_framebuffer_layers[new_framebuffer_tail].WindowY1 = lcd_height;
+    ltdc_framebuffer_layers[new_framebuffer_tail].Alpha = 0;
+    ltdc_framebuffer_layers[new_framebuffer_tail].FBStartAdress = (uint32_t) framebuffers[new_framebuffer_tail];
+    ltdc_framebuffer_layers[new_framebuffer_tail].ImageWidth = lcd_width;
+    ltdc_framebuffer_layers[new_framebuffer_tail].ImageHeight = lcd_height;
 
-    // Update head which means a new image is ready.
-    framebuffer_head = new_framebuffer_head;
+    // Update tail which means a new image is ready.
+    framebuffer_tail = new_framebuffer_tail;
 }
 
 #ifdef OMV_LCD_BL_TIM
@@ -1047,17 +1095,21 @@ static void ltdc_set_backlight(int intensity)
         HAL_GPIO_Init(OMV_LCD_BL_PORT, &GPIO_InitStructure);
 
         lcd_tim_handle.Instance = OMV_LCD_BL_TIM;
-        lcd_tim_handle.Init.Period = period;
-        lcd_tim_handle.Init.Prescaler = TIM_ETRPRESCALER_DIV1;
+        lcd_tim_handle.Init.Prescaler = 0;
         lcd_tim_handle.Init.CounterMode = TIM_COUNTERMODE_UP;
+        lcd_tim_handle.Init.Period = period;
         lcd_tim_handle.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+        lcd_tim_handle.Init.RepetitionCounter = 0;
+        lcd_tim_handle.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
 
         TIM_OC_InitTypeDef lcd_tim_oc_handle;
         lcd_tim_oc_handle.Pulse = (period * intensity) / 255;
         lcd_tim_oc_handle.OCMode = TIM_OCMODE_PWM1;
         lcd_tim_oc_handle.OCPolarity = TIM_OCPOLARITY_HIGH;
+        lcd_tim_oc_handle.OCNPolarity = TIM_OCNPOLARITY_HIGH;
         lcd_tim_oc_handle.OCFastMode = TIM_OCFAST_DISABLE;
         lcd_tim_oc_handle.OCIdleState = TIM_OCIDLESTATE_RESET;
+        lcd_tim_oc_handle.OCNIdleState = TIM_OCNIDLESTATE_RESET;
 
         HAL_TIM_PWM_Init(&lcd_tim_handle);
         HAL_TIM_PWM_ConfigChannel(&lcd_tim_handle, &lcd_tim_oc_handle, OMV_LCD_BL_TIM_CHANNEL);
@@ -1086,8 +1138,8 @@ mp_obj_t ltdc_dvi_user_cb = NULL;
 
 static mp_obj_t ltdc_dvi_get_display_connected()
 {
-    mp_obj_base_t *bus = ltdc_dvi_bus ? ltdc_dvi_bus : ((mp_obj_base_t *) machine_i2c_type.make_new(&machine_i2c_type, 3, 0, (const mp_obj_t []) {
-        MP_OBJ_NEW_SMALL_INT(-1), (mp_obj_t) OMV_DVI_SCL_PIN, (mp_obj_t) OMV_DVI_SDA_PIN
+    mp_obj_base_t *bus = ltdc_dvi_bus ? ltdc_dvi_bus : ((mp_obj_base_t *) mp_machine_soft_i2c_type.make_new(&mp_machine_soft_i2c_type, 2, 0, (const mp_obj_t []) {
+        (mp_obj_t) OMV_DVI_SCL_PIN, (mp_obj_t) OMV_DVI_SDA_PIN
     }));
 
     if (mp_machine_soft_i2c_transfer(bus, TFP410_I2C_ADDR, 1, &((mp_machine_i2c_buf_t) {
@@ -1127,8 +1179,8 @@ static bool ltdc_dvi_checksum(uint8_t *data, int long_count)
 
 static mp_obj_t ltdc_dvi_get_display_id_data()
 {
-    mp_obj_base_t *bus = ltdc_ddc_bus ? ltdc_ddc_bus : ((mp_obj_base_t *) machine_i2c_type.make_new(&machine_i2c_type, 3, 1, (const mp_obj_t []) {
-        MP_OBJ_NEW_SMALL_INT(-1), (mp_obj_t) OMV_DDC_SCL_PIN, (mp_obj_t) OMV_DDC_SDA_PIN,
+    mp_obj_base_t *bus = ltdc_ddc_bus ? ltdc_ddc_bus : ((mp_obj_base_t *) mp_machine_soft_i2c_type.make_new(&mp_machine_soft_i2c_type, 2, 1, (const mp_obj_t []) {
+        (mp_obj_t) OMV_DDC_SCL_PIN, (mp_obj_t) OMV_DDC_SDA_PIN,
             MP_OBJ_NEW_QSTR(MP_QSTR_freq),
             MP_OBJ_NEW_SMALL_INT(100000)
     }));
@@ -1212,13 +1264,13 @@ static void ltdc_dvi_init()
     HAL_GPIO_WritePin(OMV_DVI_RESET_PIN->gpio, OMV_DVI_RESET_PIN->pin_mask, GPIO_PIN_SET);
     HAL_Delay(1);
 
-    ltdc_dvi_bus = (mp_obj_base_t *) machine_i2c_type.make_new(&machine_i2c_type, 3, 0, (const mp_obj_t []) {
-        MP_OBJ_NEW_SMALL_INT(-1), (mp_obj_t) OMV_DVI_SCL_PIN, (mp_obj_t) OMV_DVI_SDA_PIN
+    ltdc_dvi_bus = (mp_obj_base_t *) mp_machine_soft_i2c_type.make_new(&mp_machine_soft_i2c_type, 2, 0, (const mp_obj_t []) {
+        (mp_obj_t) OMV_DVI_SCL_PIN, (mp_obj_t) OMV_DVI_SDA_PIN
     });
 
     #ifdef OMV_DDC_PRESENT
-    ltdc_ddc_bus = (mp_obj_base_t *) machine_i2c_type.make_new(&machine_i2c_type, 3, 1, (const mp_obj_t []) {
-        MP_OBJ_NEW_SMALL_INT(-1), (mp_obj_t) OMV_DDC_SCL_PIN, (mp_obj_t) OMV_DDC_SDA_PIN,
+    ltdc_ddc_bus = (mp_obj_base_t *) mp_machine_soft_i2c_type.make_new(&mp_machine_soft_i2c_type, 2, 1, (const mp_obj_t []) {
+        (mp_obj_t) OMV_DDC_SCL_PIN, (mp_obj_t) OMV_DDC_SDA_PIN,
             MP_OBJ_NEW_QSTR(MP_QSTR_freq),
             MP_OBJ_NEW_SMALL_INT(100000)
     });
@@ -1554,7 +1606,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(py_lcd_get_point_y_position_obj, py_lcd_get_poi
 
 STATIC mp_obj_t py_lcd_display(uint n_args, const mp_obj_t *args, mp_map_t *kw_args)
 {
-    image_t *arg_img = py_helper_arg_to_image_mutable(args[0]);
+    image_t *arg_img = py_helper_arg_to_image_mutable_bayer(args[0]);
 
     int arg_x_off = 0;
     int arg_y_off = 0;
@@ -1681,6 +1733,7 @@ STATIC const mp_rom_map_elem_t globals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),                MP_OBJ_NEW_QSTR(MP_QSTR_lcd)                    },
     { MP_ROM_QSTR(MP_QSTR_LCD_NONE),                MP_ROM_INT(LCD_NONE)                            },
     { MP_ROM_QSTR(MP_QSTR_LCD_SHIELD),              MP_ROM_INT(LCD_SHIELD)                          },
+#ifdef OMV_DVI_PRESENT
     { MP_ROM_QSTR(MP_QSTR_LCD_DISPLAY),             MP_ROM_INT(LCD_DISPLAY)                         },
     { MP_ROM_QSTR(MP_QSTR_LCD_DISPLAY_WITH_HDMI),   MP_ROM_INT(LCD_DISPLAY_WITH_HDMI)               },
     { MP_ROM_QSTR(MP_QSTR_LCD_DISPLAY_ONLY_HDMI),   MP_ROM_INT(LCD_DISPLAY_ONLY_HDMI)               },
@@ -1702,6 +1755,7 @@ STATIC const mp_rom_map_elem_t globals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_UXGA),                    MP_ROM_INT(LCD_DISPLAY_UXGA)                    },
     { MP_ROM_QSTR(MP_QSTR_HD),                      MP_ROM_INT(LCD_DISPLAY_HD)                      },
     { MP_ROM_QSTR(MP_QSTR_FHD),                     MP_ROM_INT(LCD_DISPLAY_FHD)                     },
+#endif
 #ifdef OMV_TOUCH_PRESENT
     { MP_ROM_QSTR(MP_QSTR_LCD_GESTURE_MOVE_UP),     MP_ROM_INT(PY_LCD_TOUCH_GESTURE_MOVE_UP)        },
     { MP_ROM_QSTR(MP_QSTR_LCD_GESTURE_MOVE_LEFT),   MP_ROM_INT(PY_LCD_TOUCH_GESTURE_MOVE_LEFT)      },
@@ -1760,14 +1814,14 @@ STATIC const mp_rom_map_elem_t globals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_get_point_x_position),    MP_ROM_PTR(&py_lcd_get_point_x_position_obj)    },
     { MP_ROM_QSTR(MP_QSTR_get_point_y_position),    MP_ROM_PTR(&py_lcd_get_point_y_position_obj)    },
 #else
-    { MP_ROM_QSTR(MP_QSTR_update_touch_points),     MP_ROM_PTR(&py_func_unavailable_obj)},
-    { MP_ROM_QSTR(MP_QSTR_register_touch_cb),       MP_ROM_PTR(&py_func_unavailable_obj)},
-    { MP_ROM_QSTR(MP_QSTR_get_gesture),             MP_ROM_PTR(&py_func_unavailable_obj)},
-    { MP_ROM_QSTR(MP_QSTR_get_points),              MP_ROM_PTR(&py_func_unavailable_obj)},
-    { MP_ROM_QSTR(MP_QSTR_get_point_flag),          MP_ROM_PTR(&py_func_unavailable_obj)},
-    { MP_ROM_QSTR(MP_QSTR_get_point_id),            MP_ROM_PTR(&py_func_unavailable_obj)},
-    { MP_ROM_QSTR(MP_QSTR_get_point_x_position),    MP_ROM_PTR(&py_func_unavailable_obj)},
-    { MP_ROM_QSTR(MP_QSTR_get_point_y_position),    MP_ROM_PTR(&py_func_unavailable_obj)},
+    { MP_ROM_QSTR(MP_QSTR_update_touch_points),     MP_ROM_PTR(&py_func_unavailable_obj)            },
+    { MP_ROM_QSTR(MP_QSTR_register_touch_cb),       MP_ROM_PTR(&py_func_unavailable_obj)            },
+    { MP_ROM_QSTR(MP_QSTR_get_gesture),             MP_ROM_PTR(&py_func_unavailable_obj)            },
+    { MP_ROM_QSTR(MP_QSTR_get_points),              MP_ROM_PTR(&py_func_unavailable_obj)            },
+    { MP_ROM_QSTR(MP_QSTR_get_point_flag),          MP_ROM_PTR(&py_func_unavailable_obj)            },
+    { MP_ROM_QSTR(MP_QSTR_get_point_id),            MP_ROM_PTR(&py_func_unavailable_obj)            },
+    { MP_ROM_QSTR(MP_QSTR_get_point_x_position),    MP_ROM_PTR(&py_func_unavailable_obj)            },
+    { MP_ROM_QSTR(MP_QSTR_get_point_y_position),    MP_ROM_PTR(&py_func_unavailable_obj)            },
 #endif
     { MP_ROM_QSTR(MP_QSTR_display),                 MP_ROM_PTR(&py_lcd_display_obj)                 },
     { MP_ROM_QSTR(MP_QSTR_clear),                   MP_ROM_PTR(&py_lcd_clear_obj)                   },
@@ -1784,3 +1838,5 @@ void py_lcd_init0()
 {
     py_lcd_deinit();
 }
+
+#endif // MICROPY_PY_LCD

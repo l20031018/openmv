@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -14,6 +14,7 @@
 extern const mp_obj_fun_builtin_var_t py_func_unavailable_obj;
 image_t *py_helper_arg_to_image_mutable(const mp_obj_t arg);
 image_t *py_helper_arg_to_image_mutable_bayer(const mp_obj_t arg);
+image_t *py_helper_arg_to_image_mutable_bayer_jpeg(const mp_obj_t arg);
 image_t *py_helper_arg_to_image_grayscale(const mp_obj_t arg);
 image_t *py_helper_arg_to_image_color(const mp_obj_t arg);
 image_t *py_helper_keyword_to_image_mutable(uint n_args, const mp_obj_t *args, uint arg_index,

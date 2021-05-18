@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -41,6 +41,9 @@
 
 // HSE/HSI/CSI State
 #define OMV_OSC_HSE_STATE       (RCC_HSE_ON)
+
+// Clock Sources
+#define OMV_OSC_PLL_CLKSOURCE   RCC_PLLSOURCE_HSE
 
 // Flash Latency
 #define OMV_FLASH_LATENCY       (FLASH_LATENCY_5)

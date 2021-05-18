@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -89,6 +89,9 @@
 // HSE/HSI/CSI State
 #define OMV_OSC_HSE_STATE       (RCC_HSE_ON)
 
+// Clock Sources
+#define OMV_OSC_PLL_CLKSOURCE   (RCC_PLLSOURCE_HSE)
+
 // Flash Latency
 #define OMV_FLASH_LATENCY       (FLASH_LATENCY_7)
 
@@ -103,11 +106,12 @@
 #define OMV_FB_SIZE         (300K)  // FB memory: header + VGA/GS image
 #define OMV_FB_ALLOC_SIZE   (84K)   // minimum fb alloc size
 #define OMV_STACK_SIZE      (16K)
-#define OMV_HEAP_SIZE       (56K)
+#define OMV_HEAP_SIZE       (55K)
 
 #define OMV_LINE_BUF_SIZE   (3 * 1024)  // Image line buffer round(640 * 2BPP * 2 buffers).
 #define OMV_MSC_BUF_SIZE    (2K)    // USB MSC bot data
 #define OMV_VFS_BUF_SIZE    (1K)    // VFS sturct + FATFS file buffer (624 bytes)
+#define OMV_FIR_LEPTON_BUF_SIZE (1K) // FIR Lepton Packet Double Buffer (328 bytes)
 #define OMV_FFS_BUF_SIZE    (32K)   // Flash filesystem cache
 #define OMV_JPEG_BUF_SIZE   (22 * 1024) // IDE JPEG buffer (header + data).
 
@@ -248,6 +252,10 @@
 #define OMV_SPI_LCD_MOSI_PIN                (GPIO_PIN_15)
 #define OMV_SPI_LCD_MOSI_PORT               (GPIOB)
 #define OMV_SPI_LCD_MOSI_ALT                (GPIO_AF5_SPI2)
+
+#define OMV_SPI_LCD_MISO_PIN                (GPIO_PIN_14)
+#define OMV_SPI_LCD_MISO_PORT               (GPIOB)
+#define OMV_SPI_LCD_MISO_ALT                (GPIO_AF5_SPI2)
 
 #define OMV_SPI_LCD_SCLK_PIN                (GPIO_PIN_13)
 #define OMV_SPI_LCD_SCLK_PORT               (GPIOB)

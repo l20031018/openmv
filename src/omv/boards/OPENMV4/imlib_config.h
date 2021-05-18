@@ -1,8 +1,8 @@
 /*
  * This file is part of the OpenMV project.
  *
- * Copyright (c) 2013-2019 Ibrahim Abdelkader <iabdalkader@openmv.io>
- * Copyright (c) 2013-2019 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
  *
  * This work is licensed under the MIT license, see the file LICENSE for details.
  *
@@ -83,7 +83,7 @@
 #endif
 
 // Enable get_similarity()
-// #define IMLIB_ENABLE_GET_SIMILARITY
+#define IMLIB_ENABLE_GET_SIMILARITY
 
 // Enable find_lines()
 #define IMLIB_ENABLE_FIND_LINES
